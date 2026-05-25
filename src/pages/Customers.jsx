@@ -1,7 +1,6 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Customer, Sale } from "@/api/base44Client";
 
 import { Plus, Search, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,40 +30,43 @@ export default function Customers() {
 
   const { data: customers = [] } = useQuery({
     queryKey: ["customers"],
-    queryFn: () => db.entities.Customer.list("-created_date", 500),
+    queryFn: () => Customer.list('-created_at', 500),
   });
 
   const { data: sales = [] } = useQuery({
     queryKey: ["sales"],
-    queryFn: () => db.entities.Sale.list("-sale_date", 1000),
+    queryFn: () => Sale.list('-created_at', 1000),
   });
 
   const createMut = useMutation({
-    mutationFn: (data) => db.entities.Customer.create(data),
+    mutationFn: (data) => Customer.create(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customers"] });
       setFormOpen(false);
       toast.success("تمت إضافة العميل");
     },
+    onError: (e) => toast.error("خطأ: " + e.message),
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, data }) => db.entities.Customer.update(id, data),
+    mutationFn: ({ id, data }) => Customer.update(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customers"] });
       setFormOpen(false);
       setEditing(null);
       toast.success("تم حفظ التعديلات");
     },
+    onError: (e) => toast.error("خطأ: " + e.message),
   });
 
   const deleteMut = useMutation({
-    mutationFn: (id) => db.entities.Customer.delete(id),
+    mutationFn: (id) => Customer.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customers"] });
       setDeleting(null);
       toast.success("تم حذف العميل");
     },
+    onError: (e) => toast.error("خطأ: " + e.message),
   });
 
   const handleSubmit = (data) => {
