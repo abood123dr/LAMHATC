@@ -130,11 +130,18 @@ const integrations = {
   Core: {
     async UploadFile({ file }) {
       const { data: { user } } = await supabase.auth.getUser();
-      const fileName = `${Date.now()}_${file.name}`;
-      const path = `uploads/${user?.id || 'anonymous'}/${fileName}`;
+      const extension = file.name?.split('.').pop()?.toLowerCase() || 'jpg';
+      const safeName = `${Date.now()}_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}.${extension}`;
+      const path = `uploads/${user?.id || 'anonymous'}/${safeName}`;
       const { data, error } = await supabase.storage
-        .from('files').upload(path, file);
-      if (error) throw error;
+        .from('files').upload(path, file, {
+          cacheControl: '3600',
+          contentType: file.type || undefined,
+          upsert: false,
+        });
+      if (error) {
+        throw new Error(`Storage upload failed: ${error.message}`);
+      }
       const { data: { publicUrl } } = supabase.storage
         .from('files').getPublicUrl(path);
       return { file_url: publicUrl };

@@ -1,12 +1,13 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useRef } from "react";
+import base44 from "@/api/base44Client";
 import { User, AtSign, FileText, Camera } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 import { toast } from "sonner";
+
+const db = globalThis.__B44_DB__ || base44;
 
 export default function Step1BasicInfo({ data, update }) {
   const fileRef = useRef();

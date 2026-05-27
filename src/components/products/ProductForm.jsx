@@ -1,6 +1,5 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useState } from "react";
+import base44 from "@/api/base44Client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +7,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 
 import { Upload, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+
+const db = globalThis.__B44_DB__ || base44;
 
 export default function ProductForm({ open, onOpenChange, product, onSubmit }) {
   const [form, setForm] = useState(
@@ -47,9 +49,14 @@ export default function ProductForm({ open, onOpenChange, product, onSubmit }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
-    const { file_url } = await db.integrations.Core.UploadFile({ file });
-    setForm((f) => ({ ...f, image_url: file_url }));
-    setUploading(false);
+    try {
+      const { file_url } = await db.integrations.Core.UploadFile({ file });
+      setForm((f) => ({ ...f, image_url: file_url }));
+    } catch (error) {
+      toast.error("تعذر رفع صورة المنتج. تأكد من إعدادات Supabase Storage.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const submit = (e) => {

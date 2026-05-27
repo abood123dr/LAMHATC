@@ -1,9 +1,11 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useState, useRef } from "react";
+import base44 from "@/api/base44Client";
 
 import { X, Loader2, ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+
+const db = globalThis.__B44_DB__ || base44;
 
 export default function ImageUploader({ value = [], onChange, max = 10 }) {
   const [uploading, setUploading] = useState(false);
@@ -15,12 +17,17 @@ export default function ImageUploader({ value = [], onChange, max = 10 }) {
     if (!list.length) return;
     setUploading(true);
     const urls = [];
-    for (const file of list) {
-      const { file_url } = await db.integrations.Core.UploadFile({ file });
-      urls.push(file_url);
+    try {
+      for (const file of list) {
+        const { file_url } = await db.integrations.Core.UploadFile({ file });
+        urls.push(file_url);
+      }
+      onChange([...value, ...urls]);
+    } catch (error) {
+      toast.error("تعذر رفع الصور. تأكد من إعدادات Supabase Storage.");
+    } finally {
+      setUploading(false);
     }
-    onChange([...value, ...urls]);
-    setUploading(false);
   };
 
   const removeImage = (idx) => {
