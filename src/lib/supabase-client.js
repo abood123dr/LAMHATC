@@ -1,7 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl  = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey  = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const explicitSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+function inferSupabaseUrlFromAnonKey(key) {
+  try {
+    const [, payload] = key.split('.');
+    if (!payload) return '';
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(normalized.length + ((4 - normalized.length % 4) % 4), '=');
+    const decoded = JSON.parse(globalThis.atob(padded));
+    return decoded?.ref ? `https://${decoded.ref}.supabase.co` : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+const supabaseUrl = explicitSupabaseUrl || inferSupabaseUrlFromAnonKey(supabaseKey || '');
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
 class EmptyQuery {
