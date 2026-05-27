@@ -1,36 +1,15 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { supabase } from '@/lib/supabase-client';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase-client';
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser]                       = useState(null);
+  const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoadingAuth, setIsLoadingAuth]     = useState(true);
-  const [authChecked, setAuthChecked]         = useState(false);
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  useEffect(() => {
-    // فحص الجلسة عند تحميل التطبيق
-    checkUserAuth();
-
-    // الاستماع لتغييرات حالة المصادقة
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (session?.user) {
-          await loadUserProfile(session.user);
-        } else {
-          setUser(null);
-          setIsAuthenticated(false);
-        }
-        setIsLoadingAuth(false);
-        setAuthChecked(true);
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const loadUserProfile = async (authUser) => {
+  const loadUserProfile = useCallback(async (authUser) => {
     try {
       const { data: profile } = await supabase
         .from('user_profiles')
@@ -38,22 +17,19 @@ export const AuthProvider = ({ children }) => {
         .eq('id', authUser.id)
         .single();
 
-      const fullUser = {
+      setUser({
         ...authUser,
         ...(profile || {}),
         email: authUser.email,
-      };
-
-      setUser(fullUser);
+      });
       setIsAuthenticated(true);
     } catch (error) {
-      // حتى لو مافي profile، المستخدم مصادق عليه
       setUser(authUser);
       setIsAuthenticated(true);
     }
-  };
+  }, []);
 
-  const checkUserAuth = async () => {
+  const checkUserAuth = useCallback(async () => {
     try {
       setIsLoadingAuth(true);
       const { data: { user: authUser }, error } = await supabase.auth.getUser();
@@ -71,6 +47,42 @@ export const AuthProvider = ({ children }) => {
       setIsLoadingAuth(false);
       setAuthChecked(true);
     }
+  }, [loadUserProfile]);
+
+  useEffect(() => {
+    checkUserAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          await loadUserProfile(session.user);
+        } else {
+          setUser(null);
+          setIsAuthenticated(false);
+        }
+        setIsLoadingAuth(false);
+        setAuthChecked(true);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, [checkUserAuth, loadUserProfile]);
+
+  const login = async (email, password) => {
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase is not configured');
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+
+    if (data?.user) {
+      await loadUserProfile(data.user);
+    } else {
+      await checkUserAuth();
+    }
+
+    return data;
   };
 
   const logout = async () => {
@@ -89,10 +101,11 @@ export const AuthProvider = ({ children }) => {
       user,
       isAuthenticated,
       isLoadingAuth,
-      isLoadingPublicSettings: false, // مو محتاجها مع Supabase
+      isLoadingPublicSettings: false,
       authError: null,
       appPublicSettings: null,
       authChecked,
+      login,
       logout,
       navigateToLogin,
       checkUserAuth,

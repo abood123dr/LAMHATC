@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase-client";
+import { isSupabaseConfigured } from "@/lib/supabase-client";
 import { useAuth } from "@/lib/AuthContext";
 import {
   ArrowLeft,
@@ -23,7 +23,7 @@ const previewTabs = [
 
 export default function Landing() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, login } = useAuth();
   const [activeTab, setActiveTab] = useState("sales");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -45,10 +45,9 @@ export default function Landing() {
     setError("");
 
     try {
-      const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
-      if (loginError) throw loginError;
-      navigate("/dashboard");
-    } catch (loginError) {
+      await login(email, password);
+      navigate("/dashboard", { replace: true });
+    } catch (error) {
       setError(
         isSupabaseConfigured
           ? "بيانات الدخول غير صحيحة أو لا تملك صلاحية دخول."
@@ -157,6 +156,12 @@ export default function Landing() {
                   />
                 </label>
 
+                {!isSupabaseConfigured && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+                    أضف متغيرات Supabase في Vercel حتى يعمل تسجيل الدخول.
+                  </div>
+                )}
+
                 {error && (
                   <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
                     {error}
@@ -165,7 +170,7 @@ export default function Landing() {
 
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || !isSupabaseConfigured}
                   className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                 >
                   {loading ? "جاري الدخول..." : isAuthenticated ? "فتح لوحة التحكم" : "دخول للنظام"}
