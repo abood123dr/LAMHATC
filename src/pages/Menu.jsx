@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
   Banknote,
+  BellRing,
   Camera,
   Check,
   CheckCircle2,
@@ -18,12 +19,14 @@ import {
   Phone,
   Plus,
   Search,
+  ShieldCheck,
   ShoppingBag,
   ShoppingCart,
   Sparkles,
   Trash2,
   User,
   X,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import base44 from "@/api/base44Client";
@@ -65,12 +68,59 @@ const BANK_INFO = {
   currency: "TL",
 };
 
+const CATALOG_TIMEOUT_MS = 9000;
+
+const CATEGORY_IMAGE_FALLBACKS = [
+  {
+    match: ["ورد", "زهور", "flower", "rose"],
+    url: "https://images.unsplash.com/photo-1490750967868-88aa4486c946?auto=format&fit=crop&w=900&q=80",
+  },
+  {
+    match: ["هدية", "هدايا", "gift"],
+    url: "https://images.unsplash.com/photo-1513201099705-a9746e1e201f?auto=format&fit=crop&w=900&q=80",
+  },
+  {
+    match: ["ديكور", "decor", "ستاند", "stand"],
+    url: "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?auto=format&fit=crop&w=900&q=80",
+  },
+  {
+    match: ["عطر", "تجميل", "beauty", "perfume"],
+    url: "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=900&q=80",
+  },
+  {
+    match: ["قهوة", "شاي", "coffee"],
+    url: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=900&q=80",
+  },
+  {
+    match: [],
+    url: "https://images.unsplash.com/photo-1512436991641-6745cdb1723f?auto=format&fit=crop&w=900&q=80",
+  },
+];
+
 const getInitialBranch = () => {
   const branch = new URLSearchParams(window.location.search).get("branch");
   return branch === "turkey" ? "turkey" : "saudi";
 };
 
 const formatMoney = (value, currency) => `${Number(value || 0).toLocaleString("ar-SA")} ${currency}`;
+
+const normalizeText = (value = "") => value.toString().trim().toLowerCase();
+
+const getCategoryFallbackImage = (categoryName = "") => {
+  const normalized = normalizeText(categoryName);
+  return (
+    CATEGORY_IMAGE_FALLBACKS.find((item) => item.match.some((word) => normalized.includes(word))) ||
+    CATEGORY_IMAGE_FALLBACKS[CATEGORY_IMAGE_FALLBACKS.length - 1]
+  ).url;
+};
+
+const withTimeout = (promise, timeoutMs = CATALOG_TIMEOUT_MS) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error("timeout")), timeoutMs);
+    }),
+  ]);
 
 function playTapSound() {
   try {
@@ -99,6 +149,8 @@ export default function Menu() {
   const [products, setProducts] = useState([]);
   const [categoryRecords, setCategoryRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [slowLoading, setSlowLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [cart, setCart] = useState([]);
@@ -114,6 +166,7 @@ export default function Menu() {
   const [checkingCode, setCheckingCode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef(null);
+  const loadRequestRef = useRef(0);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -121,31 +174,58 @@ export default function Menu() {
     window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
   }, [branch]);
 
+  const loadCatalog = useCallback(async () => {
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
+    setLoading(true);
+    setSlowLoading(false);
+    setLoadError("");
+
+    const slowTimer = window.setTimeout(() => {
+      if (loadRequestRef.current === requestId) setSlowLoading(true);
+    }, 1600);
+
+    try {
+      const [productData, categoryData] = await withTimeout(Promise.all([
+        db.entities.Product.list("-created_at", 500),
+        db.entities.Category?.list ? db.entities.Category.list("sort_order", 500) : Promise.resolve([]),
+      ]));
+      if (loadRequestRef.current !== requestId) return;
+      setProducts(productData || []);
+      setCategoryRecords(categoryData || []);
+    } catch (error) {
+      if (loadRequestRef.current !== requestId) return;
+      setProducts([]);
+      setCategoryRecords([]);
+      setLoadError(error.message === "timeout" ? "استغرق تحميل الكتالوج وقتًا أطول من المتوقع." : "تعذر تحميل الكتالوج الآن.");
+    } finally {
+      window.clearTimeout(slowTimer);
+      if (loadRequestRef.current === requestId) {
+        setSlowLoading(false);
+        setLoading(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
-    let mounted = true;
+    loadCatalog();
 
-    Promise.all([
-      db.entities.Product.list("-created_at", 500),
-      db.entities.Category?.list ? db.entities.Category.list("sort_order", 500) : Promise.resolve([]),
-    ])
-      .then(([productData, categoryData]) => {
-        if (!mounted) return;
-        setProducts(productData || []);
-        setCategoryRecords(categoryData || []);
-      })
-      .finally(() => mounted && setLoading(false));
-
-    const unsubscribe = db.entities.Product.subscribe?.((event) => {
-      if (event.type === "create") setProducts((items) => [event.data, ...items]);
-      if (event.type === "update") setProducts((items) => items.map((item) => item.id === event.id ? event.data : item));
-      if (event.type === "delete") setProducts((items) => items.filter((item) => item.id !== event.id));
-    }) || (() => {});
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = db.entities.Product.subscribe?.((event) => {
+        if (event.type === "create") setProducts((items) => [event.data, ...items]);
+        if (event.type === "update") setProducts((items) => items.map((item) => item.id === event.id ? event.data : item));
+        if (event.type === "delete") setProducts((items) => items.filter((item) => item.id !== event.id));
+      }) || (() => {});
+    } catch (error) {
+      unsubscribe = () => {};
+    }
 
     return () => {
-      mounted = false;
+      loadRequestRef.current += 1;
       unsubscribe();
     };
-  }, []);
+  }, [loadCatalog]);
 
   const categories = useMemo(() => {
     const names = [...new Set(products.map((product) => product.category).filter(Boolean))];
@@ -174,6 +254,19 @@ export default function Menu() {
     return [...map.values()].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
   }, [categoryRecords, products]);
 
+  const categoryImageByName = useMemo(() => {
+    const map = new Map();
+    categories.forEach((category) => {
+      map.set(category.name, category.image_url || getCategoryFallbackImage(category.name));
+    });
+    return map;
+  }, [categories]);
+
+  const getProductDisplayImage = useCallback(
+    (product) => product.image_url || categoryImageByName.get(product.category) || getCategoryFallbackImage(product.category),
+    [categoryImageByName]
+  );
+
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     return products.filter((product) => {
@@ -184,6 +277,20 @@ export default function Menu() {
         .some((value) => value.toLowerCase().includes(normalizedSearch));
     });
   }, [activeCategory, products, search]);
+
+  const availableCount = useMemo(
+    () => products.filter((product) => Number(product[meta.stockKey] || 0) > 0).length,
+    [meta.stockKey, products]
+  );
+
+  const heroImages = useMemo(() => {
+    const productImages = products
+      .filter((product) => product.image_url)
+      .slice(0, 4)
+      .map((product) => product.image_url);
+    const categoryImages = categories.slice(0, 4).map((category) => category.image_url || getCategoryFallbackImage(category.name));
+    return [...productImages, ...categoryImages, ...CATEGORY_IMAGE_FALLBACKS.map((item) => item.url)].slice(0, 4);
+  }, [categories, products]);
 
   const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0);
   const discountAmount = appliedDiscount
@@ -578,139 +685,134 @@ export default function Menu() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f7f2] text-slate-950" dir="rtl">
-      <section className="border-b border-slate-200 bg-white">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 py-6 lg:grid-cols-[1fr_360px] lg:px-6">
-          <div className="flex flex-col justify-center">
-            <div className="mb-4 flex flex-wrap items-center gap-2">
+    <main className="min-h-screen overflow-x-hidden bg-[#f7f9fb] text-slate-950" dir="rtl">
+      <section className="relative border-b border-slate-200 bg-white">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[1fr_320px_260px] lg:items-center lg:px-6 lg:py-7">
+          <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} className="order-1 min-w-0 overflow-hidden text-right">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-black text-amber-800">
                 <Sparkles className="h-4 w-4" /> كتالوج عام للطلب المباشر
               </span>
-              <span className="inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
-                {meta.flag} فرع {meta.label}
+              <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                <BellRing className="h-4 w-4" /> تنبيه فوري عند الطلب
               </span>
             </div>
-            <h1 className="max-w-3xl text-3xl font-black leading-tight sm:text-4xl lg:text-5xl">
+            <h1 className="max-w-full break-words text-3xl font-black leading-tight text-slate-950 sm:text-4xl lg:text-5xl">
               كتالوج لمحاتك
             </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
-              اختر المنتجات المناسبة، أضف بياناتك، وسيصل الطلب مباشرة للنظام مع إشعار للإدارة.
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
+              تصفح المنتجات، اختر الفرع، وأرسل طلبك بخطوات قليلة. البيانات تصل للنظام تلقائيًا مع تفاصيل العميل والطلب.
             </p>
-          </div>
+            <div className="mt-4 grid grid-cols-3 gap-2 sm:max-w-lg">
+              <StatPill icon={Package} label="منتجات" value={products.length} />
+              <StatPill icon={ShieldCheck} label="متاح" value={availableCount} tone="emerald" />
+              <StatPill icon={Zap} label="أقسام" value={categories.length} tone="amber" />
+            </div>
+          </motion.div>
 
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <p className="mb-3 text-sm font-black">اختر الفرع</p>
+          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.45, delay: 0.08 }} className="order-3 grid grid-cols-2 gap-2 lg:order-2">
+            {heroImages.map((image, index) => (
+              <div key={`${image}-${index}`} className={`overflow-hidden rounded-lg bg-slate-100 ${index === 0 ? "row-span-2 aspect-[4/5]" : "aspect-[4/3]"}`}>
+                <img src={image} alt="" className="h-full w-full object-cover" loading="lazy" />
+              </div>
+            ))}
+          </motion.div>
+
+          <motion.div initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.45, delay: 0.12 }} className="order-2 rounded-lg border border-slate-200 bg-slate-50 p-3 lg:order-3">
+            <p className="mb-2 text-sm font-black">اختر الفرع</p>
             <div className="grid grid-cols-2 gap-2">
               {Object.entries(BRANCH_META).map(([key, item]) => (
-                <button key={key} onClick={() => { setBranch(key); setCart([]); setActiveCategory("all"); }} className={`rounded-lg border p-3 text-right transition ${branch === key ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
+                <button
+                  key={key}
+                  onClick={() => {
+                    playTapSound();
+                    setBranch(key);
+                    setCart([]);
+                    setActiveCategory("all");
+                  }}
+                  className={`min-h-16 rounded-lg border p-3 text-right transition duration-200 hover:-translate-y-0.5 ${
+                    branch === key
+                      ? "border-slate-950 bg-slate-950 text-white shadow-lg shadow-slate-950/15"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"
+                  }`}
+                >
                   <span className="text-xl">{item.flag}</span>
                   <p className="mt-1 text-sm font-black">{item.label}</p>
                 </button>
               ))}
             </div>
-          </div>
+          </motion.div>
         </div>
       </section>
 
-      <section className="sticky top-0 z-20 border-b border-slate-200 bg-[#f6f7f2]/92 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 lg:px-6">
+      <section className="sticky top-0 z-20 border-b border-slate-200 bg-[#f7f9fb]/92 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 lg:px-6">
           <label className="relative block">
             <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث عن منتج أو قسم..." className="h-12 w-full rounded-lg border border-slate-200 bg-white px-10 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="ابحث عن منتج أو قسم..."
+              className="h-12 w-full rounded-lg border border-slate-200 bg-white px-10 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+            />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <button onClick={() => { playTapSound(); setSearch(""); }} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
                 <X className="h-4 w-4" />
               </button>
             )}
           </label>
 
-          {categories.length > 0 && (
-            <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-              {[{ name: "all", image_url: "", count: products.length }, ...categories].map((category) => {
-                const active = activeCategory === category.name;
-                return (
-                  <button key={category.name} onClick={() => setActiveCategory(category.name)} className={`grid min-w-[120px] grid-cols-[42px_1fr] items-center gap-2 rounded-lg border p-2 text-right transition ${active ? "border-slate-950 bg-white shadow-sm" : "border-slate-200 bg-white/70"}`}>
-                    <span className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">
-                      {category.image_url ? <img src={category.image_url} alt="" className="h-full w-full object-cover" /> : <Package className="mx-auto mt-2.5 h-5 w-5 text-slate-400" />}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs font-black">{category.name === "all" ? "الكل" : category.name}</span>
-                      <span className="text-[11px] font-semibold text-slate-400">{category.count || 0} منتج</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <div className="hide-scrollbar flex gap-3 overflow-x-auto pb-1">
+            {[{ name: "all", image_url: heroImages[0], count: products.length }, ...categories].map((category) => (
+              <CategoryButton
+                key={category.name}
+                category={category}
+                active={activeCategory === category.name}
+                onClick={() => {
+                  playTapSound();
+                  setActiveCategory(category.name);
+                }}
+              />
+            ))}
+          </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 py-5 pb-28 lg:px-6">
+      <section className="mx-auto max-w-7xl px-4 py-5 pb-28 lg:px-6">
         {loading ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="h-72 animate-pulse rounded-lg bg-white" />
-            ))}
-          </div>
+          <CatalogLoadingGrid slowLoading={slowLoading} />
         ) : filteredProducts.length === 0 ? (
-          <div className="rounded-lg border border-slate-200 bg-white p-10 text-center">
-            <Package className="mx-auto h-10 w-10 text-slate-300" />
-            <h2 className="mt-4 text-lg font-black">لا توجد منتجات متاحة</h2>
-            <p className="mt-2 text-sm text-slate-500">جرّب فرعًا آخر أو غيّر كلمة البحث.</p>
-          </div>
+          <CatalogEmpty
+            hasError={!!loadError}
+            message={loadError}
+            isSearching={!!search || activeCategory !== "all"}
+            onRetry={loadCatalog}
+          />
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {filteredProducts.map((product, index) => {
-              const price = Number(product[meta.priceKey] || 0);
-              const stock = Number(product[meta.stockKey] || 0);
               const item = cart.find((cartItem) => cartItem.product_id === product.id);
               return (
-                <motion.article key={product.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * 0.03, 0.25) }} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-                  <div className="relative aspect-[4/3] bg-slate-100">
-                    {product.image_url ? <img src={product.image_url} alt={product.name} className="h-full w-full object-cover" loading="lazy" /> : <div className="flex h-full items-center justify-center"><ImageIcon className="h-10 w-10 text-slate-300" /></div>}
-                    {stock <= 0 && <div className="absolute inset-0 flex items-center justify-center bg-black/45 text-sm font-black text-white">غير متوفر</div>}
-                    {product.category && <span className="absolute right-3 top-3 rounded-full bg-white/92 px-3 py-1 text-xs font-black text-slate-700">{product.category}</span>}
-                  </div>
-                  <div className="p-4">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h2 className="line-clamp-2 text-base font-black">{product.name}</h2>
-                        {product.description && <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{product.description}</p>}
-                      </div>
-                      <p className="shrink-0 text-left text-base font-black text-slate-950">{formatMoney(price, meta.currency)}</p>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${stock <= 0 ? "bg-red-50 text-red-600" : stock <= 3 ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
-                        {stock <= 0 ? "نفد المخزون" : stock <= 3 ? `آخر ${stock}` : "متوفر"}
-                      </span>
-                      {item ? (
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => updateQty(product.id, -1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100">
-                            <Minus className="h-4 w-4" />
-                          </button>
-                          <span className="w-8 text-center text-sm font-black">{item.quantity}</span>
-                          <button onClick={() => updateQty(product.id, 1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white">
-                            <Plus className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <button onClick={() => addToCart(product)} disabled={stock <= 0} className="flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-xs font-black text-white disabled:bg-slate-300">
-                          <Plus className="h-4 w-4" /> إضافة
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </motion.article>
+                <ProductTile
+                  key={product.id}
+                  product={product}
+                  index={index}
+                  meta={meta}
+                  item={item}
+                  image={getProductDisplayImage(product)}
+                  onAdd={addToCart}
+                  onQty={updateQty}
+                />
               );
             })}
-          </div>
+          </motion.div>
         )}
       </section>
 
       <AnimatePresence>
         {cart.length > 0 && (
-          <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }} className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
-            <button onClick={() => setStep("cart")} className="mx-auto flex h-14 w-full max-w-2xl items-center justify-between rounded-lg bg-slate-950 px-4 text-white shadow-xl">
+          <motion.div initial={{ y: 88, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 88, opacity: 0 }} className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
+            <button onClick={() => { playTapSound(); setStep("cart"); }} className="mx-auto flex h-14 w-full max-w-2xl items-center justify-between rounded-lg bg-slate-950 px-4 text-white shadow-xl shadow-slate-950/20 transition hover:-translate-y-0.5">
               <span className="rounded-full bg-white/12 px-3 py-1 text-xs font-black">{cartCount}</span>
               <span className="flex items-center gap-2 text-sm font-black"><ShoppingCart className="h-5 w-5" /> عرض الطلب</span>
               <span className="text-sm font-black text-amber-300">{formatMoney(cartTotal, meta.currency)}</span>
@@ -719,6 +821,155 @@ export default function Menu() {
         )}
       </AnimatePresence>
     </main>
+  );
+}
+
+function StatPill({ icon: Icon, label, value, tone = "slate" }) {
+  const tones = {
+    slate: "bg-slate-100 text-slate-700",
+    emerald: "bg-emerald-50 text-emerald-700",
+    amber: "bg-amber-50 text-amber-800",
+  };
+
+  return (
+    <div className={`rounded-lg px-3 py-2 ${tones[tone]}`}>
+      <div className="flex items-center gap-1.5 text-[11px] font-bold">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <p className="mt-1 text-lg font-black leading-none">{Number(value || 0).toLocaleString("ar-SA")}</p>
+    </div>
+  );
+}
+
+function CategoryButton({ category, active, onClick }) {
+  const image = category.image_url || getCategoryFallbackImage(category.name);
+
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      whileTap={{ scale: 0.97 }}
+      className={`relative grid min-w-[168px] grid-cols-[54px_1fr] items-center gap-2 rounded-lg border p-2 text-right transition ${
+        active ? "border-slate-950 bg-white shadow-sm" : "border-slate-200 bg-white/80 hover:border-slate-400"
+      }`}
+    >
+      <span className="h-12 w-12 overflow-hidden rounded-lg bg-slate-100">
+        <img src={image} alt="" className="h-full w-full object-cover" loading="lazy" />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-xs font-black">{category.name === "all" ? "الكل" : category.name}</span>
+        <span className="text-[11px] font-semibold text-slate-400">{category.count || 0} منتج</span>
+      </span>
+      {active && <span className="absolute inset-x-4 -bottom-px h-0.5 rounded-full bg-amber-500" />}
+    </motion.button>
+  );
+}
+
+function CatalogLoadingGrid({ slowLoading }) {
+  return (
+    <div>
+      {slowLoading && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+          جاري تحميل الكتالوج، إذا استمر الانتظار اضغط إعادة المحاولة.
+        </div>
+      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <div key={index} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="catalog-skeleton h-48" />
+            <div className="space-y-3 p-4">
+              <div className="catalog-skeleton h-4 w-3/4 rounded" />
+              <div className="catalog-skeleton h-3 w-11/12 rounded" />
+              <div className="flex items-center justify-between pt-2">
+                <div className="catalog-skeleton h-7 w-20 rounded" />
+                <div className="catalog-skeleton h-9 w-24 rounded" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CatalogEmpty({ hasError, message, isSearching, onRetry }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-xl rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+        {hasError ? <RefreshIcon /> : <Package className="h-7 w-7" />}
+      </div>
+      <h2 className="mt-4 text-xl font-black text-slate-950">
+        {hasError ? "تعذر تحميل الكتالوج" : isSearching ? "لا توجد نتائج مطابقة" : "الكتالوج قيد التحديث"}
+      </h2>
+      <p className="mt-2 text-sm leading-7 text-slate-500">
+        {hasError ? message : isSearching ? "جرّب تغيير كلمة البحث أو اختر قسمًا آخر." : "أضف منتجات وصور من لوحة التحكم وستظهر هنا مباشرة للعملاء."}
+      </p>
+      <button onClick={onRetry} className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-5 text-sm font-black text-white transition hover:-translate-y-0.5">
+        <RefreshIcon className="h-4 w-4" />
+        إعادة المحاولة
+      </button>
+    </motion.div>
+  );
+}
+
+function RefreshIcon(props) {
+  return <Sparkles {...props} />;
+}
+
+function ProductTile({ product, index, meta, item, image, onAdd, onQty }) {
+  const price = Number(product[meta.priceKey] || 0);
+  const stock = Number(product[meta.stockKey] || 0);
+
+  return (
+    <motion.article
+      layout
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(index * 0.035, 0.28), duration: 0.35 }}
+      whileHover={{ y: -5 }}
+      className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-xl hover:shadow-slate-950/10"
+    >
+      <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
+        <img src={image} alt={product.name || ""} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" />
+        <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-950/65 to-transparent" />
+        {stock <= 0 && <div className="absolute inset-0 flex items-center justify-center bg-slate-950/55 text-sm font-black text-white">غير متوفر</div>}
+        {product.category && <span className="absolute right-3 top-3 max-w-[80%] truncate rounded-full bg-white/92 px-3 py-1 text-xs font-black text-slate-700 shadow-sm">{product.category}</span>}
+        <span className="absolute bottom-3 right-3 rounded-lg bg-white px-3 py-1.5 text-sm font-black text-slate-950 shadow-sm">
+          {formatMoney(price, meta.currency)}
+        </span>
+      </div>
+      <div className="p-4">
+        <div className="min-h-[74px]">
+          <h2 className="line-clamp-2 text-base font-black leading-6 text-slate-950">{product.name}</h2>
+          {product.description ? (
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{product.description}</p>
+          ) : (
+            <p className="mt-1 text-xs leading-5 text-slate-400">جاهز للطلب من الكتالوج.</p>
+          )}
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${stock <= 0 ? "bg-red-50 text-red-600" : stock <= 3 ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+            {stock <= 0 ? "نفد المخزون" : stock <= 3 ? `آخر ${stock}` : "متوفر الآن"}
+          </span>
+          {item ? (
+            <div className="flex items-center gap-2">
+              <button onClick={() => onQty(product.id, -1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 transition hover:bg-slate-200">
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="w-7 text-center text-sm font-black">{item.quantity}</span>
+              <button onClick={() => onQty(product.id, 1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white transition hover:bg-slate-800">
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => onAdd(product)} disabled={stock <= 0} className="flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-xs font-black text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:translate-y-0 disabled:bg-slate-300">
+              <Plus className="h-4 w-4" /> إضافة
+            </button>
+          )}
+        </div>
+      </div>
+    </motion.article>
   );
 }
 

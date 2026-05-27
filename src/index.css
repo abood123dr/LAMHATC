@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Titan+One:wght@400&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Tajawal:wght@400;500;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,7 +6,7 @@
 
 @layer base {
   :root {
-    --font-tajawal: 'Titan One', system-ui;
+    --font-tajawal: 'Tajawal', system-ui, sans-serif;
     --font-amiri: 'Inter', sans-serif;
 
     /* Luxurious warm palette - cream, gold, deep charcoal */
@@ -79,6 +79,7 @@
 
   html {
     direction: rtl;
+    overflow-x: hidden;
   }
 
   body {
@@ -86,10 +87,11 @@
     font-family: var(--font-tajawal);
     font-feature-settings: "ss01", "ss02";
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
   }
 }
 
@@ -142,6 +144,21 @@
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .catalog-skeleton {
+    background: linear-gradient(90deg, #eef2f7 0%, #ffffff 45%, #eef2f7 100%);
+    background-size: 220% 100%;
+    animation: catalog-shimmer 1.35s ease-in-out infinite;
+  }
 }
 
 /* Luxurious animations */
@@ -169,4 +186,18 @@
   background: linear-gradient(90deg, transparent, hsl(var(--accent) / 0.5), transparent);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
+}
+
+@keyframes catalog-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
