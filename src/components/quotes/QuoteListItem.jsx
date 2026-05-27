@@ -1,5 +1,5 @@
 import React from "react";
-import { FileText, Receipt, Eye, Trash2, ChevronLeft } from "lucide-react";
+import { FileText, Receipt, Eye, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import BranchBadge from "@/components/shared/BranchBadge";

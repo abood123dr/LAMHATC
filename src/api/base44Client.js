@@ -74,6 +74,26 @@ class Entity {
     if (error) throw error;
     return { success: true };
   }
+
+  subscribe(handler) {
+    const channel = supabase
+      .channel(`${this.tableName}-changes`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: this.tableName },
+        (payload) => {
+          const typeMap = { INSERT: 'create', UPDATE: 'update', DELETE: 'delete' };
+          handler({
+            type: typeMap[payload.eventType] || payload.eventType?.toLowerCase(),
+            id: payload.new?.id || payload.old?.id,
+            data: payload.new || payload.old,
+          });
+        }
+      )
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }
 }
 
 // =============================================
@@ -143,6 +163,7 @@ export const Sale          = new Entity('sales');
 export const StockMovement = new Entity('stock_movements');
 export const DiscountCode  = new Entity('discount_codes');
 export const LinkPage      = new Entity('link_pages');
+export const Category      = new Entity('categories');
 
 // =============================================
 // Export الرئيسي - نفس base44 القديم
@@ -157,6 +178,7 @@ export const base44 = {
     StockMovement,
     DiscountCode,
     LinkPage,
+    Category,
   },
   auth,
   integrations,

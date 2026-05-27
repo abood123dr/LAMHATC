@@ -10,13 +10,14 @@ import {
   Sparkles,
   FileText,
   ClipboardList,
-  Star,
   Tag,
+  Link2,
+  Star,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "لوحة التحكم" },
+  { to: "/dashboard", icon: LayoutDashboard, label: "لوحة التحكم" },
   { to: "/products", icon: Package, label: "المنتجات والمخزون" },
   { to: "/sales", icon: ShoppingBag, label: "المبيعات" },
   { to: "/customers", icon: Users, label: "العملاء" },
@@ -26,6 +27,8 @@ const navItems = [
   { to: "/orders", icon: ClipboardList, label: "الطلبات" },
 
   { to: "/discount-codes", icon: Tag, label: "أكواد الخصم" },
+  { to: "/linktree", icon: Link2, label: "صفحة الروابط" },
+  { to: "/review-link", icon: Star, label: "رابط التقييم" },
 ];
 
 export default function Sidebar({ onNavigate }) {

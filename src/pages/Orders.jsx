@@ -1,7 +1,6 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import base44 from "@/api/base44Client";
 
 import { ShoppingBag, Bell, ExternalLink, ChevronDown, Copy, Check, Link } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +12,32 @@ import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import { toast } from "sonner";
 import OrderDetail from "@/components/orders/OrderDetail";
+
+const db = globalThis.__B44_DB__ || base44;
+
+function playOrderSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const notes = [660, 880, 1040];
+    notes.forEach((freq, index) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.001, ctx.currentTime + index * 0.11);
+      gain.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + index * 0.11 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + index * 0.11 + 0.16);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + index * 0.11);
+      osc.stop(ctx.currentTime + index * 0.11 + 0.18);
+    });
+  } catch (error) {
+    // Sound is optional and may be blocked until the user interacts with the page.
+  }
+}
 
 const STATUS_LABELS = {
   new:        { label: "جديد",          color: "bg-blue-100 text-blue-700",     dot: "bg-blue-500" },
@@ -82,8 +107,9 @@ export default function Orders() {
 
   // Real-time subscription for new orders
   useEffect(() => {
-    const unsubscribe = db.entities.Order.subscribe((event) => {
+    const unsubscribe = db.entities.Order.subscribe?.((event) => {
       if (event.type === "create") {
+        playOrderSound();
         qc.invalidateQueries({ queryKey: ["orders"] });
         toast(`🛍️ طلب جديد من ${event.data?.customer_name}!`, {
           description: `${event.data?.total_amount?.toLocaleString("ar-SA")} ${event.data?.branch === "saudi" ? "ر.س" : "₺"}`,
@@ -91,7 +117,7 @@ export default function Orders() {
           action: { label: "عرض", onClick: () => setViewing(event.data) },
         });
       }
-    });
+    }) || (() => {});
     return unsubscribe;
   }, [qc]);
 
@@ -102,6 +128,11 @@ export default function Orders() {
       return;
     }
     if (prevCount !== null && orders.length > prevCount) {
+      playOrderSound();
+      toast.success("طلب جديد تمام", {
+        description: "تم تحديث قائمة الطلبات تلقائياً.",
+        duration: 5000,
+      });
       setPrevCount(orders.length);
     }
   }, [orders.length]);

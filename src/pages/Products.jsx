@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Product, Sale } from "@/api/base44Client";
-import { Plus, Search, Package, FolderPlus, X } from "lucide-react";
+import base44, { Product, Sale, Category } from "@/api/base44Client";
+import { Plus, Search, Package, FolderPlus, X, ImagePlus, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/shared/PageHeader";
@@ -20,6 +20,9 @@ export default function Products() {
   const [activeCategory, setActiveCategory] = useState("all");
   const [newCategoryInput, setNewCategoryInput] = useState("");
   const [showAddCategory, setShowAddCategory] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState({ name: "", description: "", image_url: "", sort_order: 0 });
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false);
 
   const { data: products = [] } = useQuery({
     queryKey: ["products"],
@@ -29,6 +32,11 @@ export default function Products() {
   const { data: sales = [] } = useQuery({
     queryKey: ["sales"],
     queryFn: () => Sale.list('-created_at', 1000),
+  });
+
+  const { data: categoryRecords = [] } = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => Category.list('sort_order', 500),
   });
 
   const salesByProduct = useMemo(() => {
@@ -59,6 +67,19 @@ export default function Products() {
     onError: (e) => toast.error("خطأ: " + e.message),
   });
 
+  const categoryMut = useMutation({
+    mutationFn: (data) => editingCategory?.id ? Category.update(editingCategory.id, data) : Category.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["categories"] });
+      setShowAddCategory(false);
+      setEditingCategory(null);
+      setNewCategoryInput("");
+      setCategoryDraft({ name: "", description: "", image_url: "", sort_order: 0 });
+      toast.success("تم حفظ القسم");
+    },
+    onError: (e) => toast.error("خطأ في حفظ القسم: " + e.message),
+  });
+
   const handleSubmit = (data) => {
     if (editing) updateMut.mutate({ id: editing.id, data });
     else createMut.mutate(data);
@@ -66,7 +87,40 @@ export default function Products() {
 
   const categories = useMemo(() => [...new Set(products.map((p) => p.category).filter(Boolean))].sort(), [products]);
 
+  const categoryCards = useMemo(() => {
+    const map = new Map();
+    categories.forEach((name) => {
+      const firstProduct = products.find((p) => p.category === name && p.image_url);
+      map.set(name, {
+        name,
+        description: "",
+        image_url: firstProduct?.image_url || "",
+        count: products.filter((p) => p.category === name).length,
+        source: "products",
+      });
+    });
+    categoryRecords.forEach((cat) => {
+      map.set(cat.name, {
+        ...map.get(cat.name),
+        ...cat,
+        count: products.filter((p) => p.category === cat.name).length,
+        source: "categories",
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
+  }, [categories, categoryRecords, products]);
+
   const handleAddCategory = () => {
+    const name = (categoryDraft.name || newCategoryInput).trim();
+    if (!name) return;
+    categoryMut.mutate({
+      ...categoryDraft,
+      name,
+      sort_order: Number(categoryDraft.sort_order) || categoryCards.length + 1,
+      is_active: true,
+    });
+    setActiveCategory(name);
+    return;
     const cat = newCategoryInput.trim();
     if (!cat) return;
     setActiveCategory(cat);
@@ -75,6 +129,31 @@ export default function Products() {
     setEditing({ category: cat });
     setFormOpen(true);
     toast.success(`تم إنشاء مجموعة "${cat}" — أضف منتجاً لها`);
+  };
+
+  const editCategory = (cat) => {
+    setEditingCategory(cat);
+    setCategoryDraft({
+      name: cat.name || "",
+      description: cat.description || "",
+      image_url: cat.image_url || "",
+      sort_order: cat.sort_order || 0,
+    });
+    setNewCategoryInput(cat.name || "");
+    setShowAddCategory(true);
+  };
+
+  const handleCategoryImage = async (file) => {
+    if (!file) return;
+    setUploadingCategoryImage(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      setCategoryDraft((draft) => ({ ...draft, image_url: file_url }));
+    } catch (e) {
+      toast.error("تعذر رفع صورة القسم");
+    } finally {
+      setUploadingCategoryImage(false);
+    }
   };
 
   const filtered = products.filter((p) => {
@@ -94,6 +173,65 @@ export default function Products() {
         <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث باسم المنتج، الكود، أو الفئة..." className="pr-10" />
       </div>
+      <div className="mb-6 rounded-2xl border border-border bg-card p-4 shadow-luxe">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+          <div>
+            <h2 className="font-black text-foreground">إدارة أقسام المنيو</h2>
+            <p className="text-sm text-muted-foreground">أنشئ أقسام مصورة تظهر للعميل في صفحة الطلب.</p>
+          </div>
+          <Button onClick={() => { setShowAddCategory(true); setEditingCategory(null); setCategoryDraft({ name: "", description: "", image_url: "", sort_order: categoryCards.length + 1 }); }} className="bg-gold hover:bg-gold-dark text-white gap-2">
+            <FolderPlus className="w-4 h-4" /> قسم جديد
+          </Button>
+        </div>
+
+        {showAddCategory && (
+          <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-border bg-background p-3 md:grid-cols-[120px_1fr_auto]">
+            <label className="h-28 rounded-xl border-2 border-dashed border-border bg-muted/50 flex items-center justify-center overflow-hidden cursor-pointer">
+              {categoryDraft.image_url ? (
+                <img src={categoryDraft.image_url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="text-center text-muted-foreground">
+                  <ImagePlus className="w-6 h-6 mx-auto mb-1" />
+                  <span className="text-xs">{uploadingCategoryImage ? "جاري الرفع..." : "صورة القسم"}</span>
+                </div>
+              )}
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleCategoryImage(e.target.files?.[0])} />
+            </label>
+            <div className="space-y-2">
+              <Input value={categoryDraft.name || newCategoryInput} onChange={(e) => { setCategoryDraft({ ...categoryDraft, name: e.target.value }); setNewCategoryInput(e.target.value); }} placeholder="اسم القسم" />
+              <Input value={categoryDraft.description || ""} onChange={(e) => setCategoryDraft({ ...categoryDraft, description: e.target.value })} placeholder="وصف مختصر يظهر في المنيو" />
+            </div>
+            <div className="flex gap-2 md:flex-col">
+              <Button onClick={handleAddCategory} disabled={categoryMut.isPending} className="bg-gold hover:bg-gold-dark text-white">
+                {editingCategory ? "حفظ" : "إضافة"}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => { setShowAddCategory(false); setEditingCategory(null); setNewCategoryInput(""); setCategoryDraft({ name: "", description: "", image_url: "", sort_order: 0 }); }}>
+                إلغاء
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {categoryCards.map((cat) => (
+            <button key={cat.name} onClick={() => setActiveCategory(cat.name)} className={`group overflow-hidden rounded-xl border text-right transition-all ${activeCategory === cat.name ? "border-gold ring-2 ring-gold/20" : "border-border hover:border-gold/60"}`}>
+              <div className="aspect-[5/2] bg-muted overflow-hidden">
+                {cat.image_url ? <img src={cat.image_url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" /> : <div className="w-full h-full flex items-center justify-center"><Package className="w-8 h-8 text-muted-foreground/40" /></div>}
+              </div>
+              <div className="p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-black text-sm text-foreground">{cat.name}</p>
+                  <span onClick={(e) => { e.stopPropagation(); editCategory(cat); }} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{cat.description || `${cat.count} منتج`}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <button onClick={() => setActiveCategory("all")} className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${activeCategory === "all" ? "bg-foreground text-background border-foreground shadow-sm" : "bg-card text-muted-foreground border-border hover:border-foreground/30"}`}>
           ✦ الكل <span className="mr-1 text-xs opacity-70">({products.length})</span>
@@ -103,14 +241,14 @@ export default function Products() {
             {cat} <span className="mr-1 text-xs opacity-70">({products.filter((p) => p.category === cat).length})</span>
           </button>
         ))}
-        {showAddCategory ? (
+        {false && showAddCategory ? (
           <div className="flex items-center gap-2">
             <input autoFocus value={newCategoryInput} onChange={(e) => setNewCategoryInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleAddCategory(); if (e.key === "Escape") setShowAddCategory(false); }} placeholder="اسم المجموعة..." className="px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring w-40" />
             <Button size="sm" onClick={handleAddCategory} className="bg-gold hover:bg-gold-dark text-white">إضافة</Button>
             <button onClick={() => { setShowAddCategory(false); setNewCategoryInput(""); }} className="p-1.5 rounded-lg hover:bg-accent"><X className="w-4 h-4 text-muted-foreground" /></button>
           </div>
         ) : (
-          <button onClick={() => setShowAddCategory(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-dashed border-border text-muted-foreground hover:border-gold hover:text-gold transition-all">
+          <button onClick={() => setShowAddCategory(true)} className="hidden items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-dashed border-border text-muted-foreground hover:border-gold hover:text-gold transition-all">
             <FolderPlus className="w-4 h-4" />مجموعة جديدة
           </button>
         )}

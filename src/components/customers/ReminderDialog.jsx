@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageCircle, Copy, Check, Sparkles } from "lucide-react";
+import { MessageCircle, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 
 const TEMPLATES = [

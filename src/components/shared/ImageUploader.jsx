@@ -2,7 +2,7 @@ const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me
 
 import React, { useState, useRef } from "react";
 
-import { Upload, X, Loader2, ImagePlus } from "lucide-react";
+import { X, Loader2, ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function ImageUploader({ value = [], onChange, max = 10 }) {

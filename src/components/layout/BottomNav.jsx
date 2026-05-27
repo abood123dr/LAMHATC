@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const items = [
   { to: "/orders",   icon: ClipboardList, label: "الطلبات" },
   { to: "/sales",    icon: ShoppingBag,   label: "المبيعات" },
-  { to: "/",         icon: LayoutDashboard, label: "الرئيسية", end: true },
+  { to: "/dashboard", icon: LayoutDashboard, label: "الرئيسية", end: true },
   { to: "/products", icon: Package,       label: "المنتجات" },
   { to: "/customers",icon: Users,         label: "العملاء" },
 ];

@@ -1,6 +1,5 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import base44 from "@/api/base44Client";
 
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -10,6 +9,8 @@ import {
   CreditCard, Banknote, Camera, ShoppingBag, Zap, Tag, Navigation
 } from "lucide-react";
 import { toast } from "sonner";
+
+const db = globalThis.__B44_DB__ || base44;
 
 const BRANCH_WHATSAPP = { saudi: "905010099997", turkey: "905010099997" };
 const urlParams = new URLSearchParams(window.location.search);
@@ -43,6 +44,7 @@ export default function Menu() {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [products, setProducts] = useState([]);
+  const [categoryRecords, setCategoryRecords] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [locationUrl, setLocationUrl] = useState("");
   const [gettingLocation, setGettingLocation] = useState(false);
@@ -53,21 +55,50 @@ export default function Menu() {
   const fileInputRef = useRef();
 
   useEffect(() => {
-    db.entities.Product.list("-created_date", 500)
-      .then((data) => { setProducts(data || []); setLoadingProducts(false); })
+    Promise.all([
+      db.entities.Product.list("-created_date", 500),
+      db.entities.Category?.list ? db.entities.Category.list("sort_order", 500) : Promise.resolve([]),
+    ])
+      .then(([productData, categoryData]) => {
+        setProducts(productData || []);
+        setCategoryRecords(categoryData || []);
+        setLoadingProducts(false);
+      })
       .catch(() => setLoadingProducts(false));
   }, []);
 
   useEffect(() => {
-    const unsub = db.entities.Product.subscribe((event) => {
+    const unsub = db.entities.Product.subscribe?.((event) => {
       if (event.type === "create") setProducts(p => [...p, event.data]);
       else if (event.type === "update") setProducts(p => p.map(x => x.id === event.id ? event.data : x));
       else if (event.type === "delete") setProducts(p => p.filter(x => x.id !== event.id));
-    });
+    }) || (() => {});
     return unsub;
   }, []);
 
   const categories = useMemo(() => [...new Set(products.map(p => p.category).filter(Boolean))], [products]);
+  const categoryCards = useMemo(() => {
+    const map = new Map();
+    categories.forEach((name) => {
+      const firstProduct = products.find((p) => p.category === name && p.image_url);
+      map.set(name, {
+        name,
+        image_url: firstProduct?.image_url || "",
+        description: "",
+        count: products.filter((p) => p.category === name).length,
+        is_active: true,
+      });
+    });
+    categoryRecords.forEach((cat) => {
+      if (cat.is_active === false) return;
+      map.set(cat.name, {
+        ...map.get(cat.name),
+        ...cat,
+        count: products.filter((p) => p.category === cat.name).length,
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
+  }, [categories, categoryRecords, products]);
 
   const filtered = useMemo(() => products.filter(p => {
     if (activeCategory !== "all" && p.category !== activeCategory) return false;
@@ -191,11 +222,8 @@ export default function Menu() {
     const locationText = locationUrl ? `\n📍 الموقع: ${locationUrl}` : "";
     const waMsg = `🛍️ طلب جديد من منتجات لمحة تك!\n\n👤 ${form.name}\n📱 ${form.phone}\n🏙️ ${form.city || "—"}\n\n📦 المنتجات:\n${itemsText}\n\n💰 المجموع: ${cartSubtotal} ${CURRENCY}${discountText}\n✅ الإجمالي: ${cartTotal} ${CURRENCY}\n${payText}${locationText}\n📝 ${form.notes || "—"}`;
 
-    // فتح واتساب برقم العميل مباشرةً (بادئة 90)
-    let phone = form.phone.trim().replace(/\D/g, "");
-    if (phone.startsWith("00")) phone = phone.slice(2);
-    if (!phone.startsWith("90")) phone = "90" + phone;
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(waMsg)}`, "_blank");
+    const storePhone = BRANCH_WHATSAPP[BRANCH] || BRANCH_WHATSAPP.saudi;
+    window.open(`https://wa.me/${storePhone}?text=${encodeURIComponent(waMsg)}`, "_blank");
 
     setStep(STEP_SUCCESS);
     setSubmitting(false);
@@ -559,7 +587,25 @@ export default function Menu() {
           </div>
         </div>
 
-        {categories.length > 0 && (
+        {categoryCards.length > 0 && (
+          <div className="flex gap-3 px-5 pb-5 pt-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+            {[{ name: "all", image_url: "" }, ...categoryCards].map((cat) => {
+              const active = activeCategory === cat.name;
+              return (
+                <button key={cat.name} onClick={() => setActiveCategory(cat.name)}
+                  className={`shrink-0 w-28 overflow-hidden rounded-2xl text-xs font-black transition-all text-right ${active ? "text-slate-900 shadow-lg shadow-amber-500/20 ring-2 ring-amber-300/60" : "text-white/80 hover:text-white"}`}
+                  style={active ? { background: "#fff" } : { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <span className="block h-14 bg-white/10 overflow-hidden">
+                    {cat.image_url ? <img src={cat.image_url} alt="" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center"><Package className="w-5 h-5 opacity-60" /></span>}
+                  </span>
+                  <span className="block px-2 py-2 truncate">{cat.name === "all" ? "كل المنتجات" : cat.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {false && categories.length > 0 && (
           <div className="flex gap-2 px-5 pb-5 pt-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
             {["all", ...categories].map(cat => {
               const active = activeCategory === cat;

@@ -1,5 +1,5 @@
 import React from "react";
-import { formatCurrency, formatNumber, BRANCHES } from "@/lib/utils";
+import { formatCurrency, formatNumber } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 export default function SalesStats({ sales = [], branch }) {
