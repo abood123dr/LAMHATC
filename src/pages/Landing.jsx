@@ -78,6 +78,25 @@ export default function Landing() {
               لوحة تشغيل بسيطة لإدارة الطلبات، المخزون، العملاء، المبيعات، والعروض من مكان واحد.
             </p>
 
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => navigate("/menu?branch=saudi")}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-amber-300 px-5 text-sm font-black text-slate-950 transition hover:bg-amber-200"
+              >
+                تصفح الكتالوج
+                <ShoppingBag className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => document.getElementById("login-panel")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/24 bg-white/10 px-5 text-sm font-black text-white transition hover:bg-white/16"
+              >
+                دخول الإدارة
+                <LockKeyhole className="h-4 w-4" />
+              </button>
+            </div>
+
             <div className="mt-8 grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
               {previewTabs.map((tab) => {
                 const Icon = tab.icon;
@@ -102,7 +121,7 @@ export default function Landing() {
           </div>
 
           <div className="flex items-center justify-center pb-6 lg:pb-0">
-            <div className="w-full max-w-md rounded-lg border border-white/14 bg-white p-4 shadow-2xl sm:p-5">
+            <div id="login-panel" className="w-full max-w-md rounded-lg border border-white/14 bg-white p-4 shadow-2xl sm:p-5">
               <div className="mb-5 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold text-slate-500">تسجيل دخول</p>

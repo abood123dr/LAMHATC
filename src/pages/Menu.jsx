@@ -1,145 +1,292 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
-import base44 from "@/api/base44Client";
-
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ShoppingCart, Plus, Minus, X, Search, CheckCircle2,
-  ChevronRight, Trash2, MessageCircle, Package, Sparkles,
-  ArrowRight, MapPin, Phone, User, FileText, Star,
-  CreditCard, Banknote, Camera, ShoppingBag, Zap, Tag, Navigation
+  ArrowLeft,
+  Banknote,
+  Camera,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  CreditCard,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  MapPin,
+  Minus,
+  Navigation,
+  Package,
+  Phone,
+  Plus,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  Sparkles,
+  Trash2,
+  User,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+import base44 from "@/api/base44Client";
 
 const db = globalThis.__B44_DB__ || base44;
 
-const BRANCH_WHATSAPP = { saudi: "905010099997", turkey: "905010099997" };
-const urlParams = new URLSearchParams(window.location.search);
-const BRANCH = urlParams.get("branch") === "turkey" ? "turkey" : "saudi";
-const CURRENCY = BRANCH === "saudi" ? "ر.س" : "₺";
-const PRICE_KEY = BRANCH === "saudi" ? "saudi_price" : "turkey_price";
-const STOCK_KEY = BRANCH === "saudi" ? "saudi_stock" : "turkey_stock";
-const BRANCH_LABEL = BRANCH === "saudi" ? "السعودية" : "تركيا";
-const BRANCH_FLAG = BRANCH === "saudi" ? "🇸🇦" : "🇹🇷";
+const STORE_WHATSAPP = {
+  saudi: "905010099997",
+  turkey: "905010099997",
+};
 
-const STEP_MENU = "menu";
-const STEP_CART = "cart";
-const STEP_INFO = "info";
-const STEP_SUCCESS = "success";
+const BRANCH_META = {
+  saudi: {
+    label: "السعودية",
+    flag: "🇸🇦",
+    currency: "ر.س",
+    priceKey: "saudi_price",
+    stockKey: "saudi_stock",
+    accent: "emerald",
+  },
+  turkey: {
+    label: "تركيا",
+    flag: "🇹🇷",
+    currency: "₺",
+    priceKey: "turkey_price",
+    stockKey: "turkey_stock",
+    accent: "rose",
+  },
+};
 
 const PAYMENT_METHODS = [
-  { id: "cod", label: "الدفع عند الاستلام", icon: Banknote, desc: "ادفع نقداً عند وصول طلبك" },
-  { id: "transfer", label: "تحويل بنكي", icon: CreditCard, desc: "حوّل للحساب وأرفق الإيصال (اختياري)" },
+  { id: "cod", label: "الدفع عند الاستلام", icon: Banknote, caption: "تدفع عند وصول الطلب" },
+  { id: "transfer", label: "تحويل بنكي", icon: CreditCard, caption: "ارفع إيصال التحويل اختياريًا" },
 ];
 
-const BANK_INFO = { name: "VAFAA ALAGHBAR", iban: "TR980020500009881402200003", currency: "TL" };
+const BANK_INFO = {
+  name: "VAFAA ALAGHBAR",
+  iban: "TR980020500009881402200003",
+  currency: "TL",
+};
+
+const getInitialBranch = () => {
+  const branch = new URLSearchParams(window.location.search).get("branch");
+  return branch === "turkey" ? "turkey" : "saudi";
+};
+
+const formatMoney = (value, currency) => `${Number(value || 0).toLocaleString("ar-SA")} ${currency}`;
+
+function playTapSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = 520;
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.11);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.12);
+  } catch (error) {
+    // Interaction sounds are optional and can be blocked by the browser.
+  }
+}
 
 export default function Menu() {
-  const [cart, setCart] = useState([]);
-  const [step, setStep] = useState(STEP_MENU);
+  const [branch, setBranch] = useState(getInitialBranch);
+  const meta = BRANCH_META[branch];
+  const [products, setProducts] = useState([]);
+  const [categoryRecords, setCategoryRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
+  const [cart, setCart] = useState([]);
+  const [step, setStep] = useState("menu");
   const [form, setForm] = useState({ name: "", phone: "", city: "", notes: "" });
+  const [locationUrl, setLocationUrl] = useState("");
+  const [gettingLocation, setGettingLocation] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [receiptUrl, setReceiptUrl] = useState("");
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [products, setProducts] = useState([]);
-  const [categoryRecords, setCategoryRecords] = useState([]);
-  const [loadingProducts, setLoadingProducts] = useState(true);
-  const [locationUrl, setLocationUrl] = useState("");
-  const [gettingLocation, setGettingLocation] = useState(false);
-  // كود الخصم
   const [discountCode, setDiscountCode] = useState("");
   const [appliedDiscount, setAppliedDiscount] = useState(null);
   const [checkingCode, setCheckingCode] = useState(false);
-  const fileInputRef = useRef();
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("branch", branch);
+    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+  }, [branch]);
+
+  useEffect(() => {
+    let mounted = true;
+
     Promise.all([
-      db.entities.Product.list("-created_date", 500),
+      db.entities.Product.list("-created_at", 500),
       db.entities.Category?.list ? db.entities.Category.list("sort_order", 500) : Promise.resolve([]),
     ])
       .then(([productData, categoryData]) => {
+        if (!mounted) return;
         setProducts(productData || []);
         setCategoryRecords(categoryData || []);
-        setLoadingProducts(false);
       })
-      .catch(() => setLoadingProducts(false));
-  }, []);
+      .finally(() => mounted && setLoading(false));
 
-  useEffect(() => {
-    const unsub = db.entities.Product.subscribe?.((event) => {
-      if (event.type === "create") setProducts(p => [...p, event.data]);
-      else if (event.type === "update") setProducts(p => p.map(x => x.id === event.id ? event.data : x));
-      else if (event.type === "delete") setProducts(p => p.filter(x => x.id !== event.id));
+    const unsubscribe = db.entities.Product.subscribe?.((event) => {
+      if (event.type === "create") setProducts((items) => [event.data, ...items]);
+      if (event.type === "update") setProducts((items) => items.map((item) => item.id === event.id ? event.data : item));
+      if (event.type === "delete") setProducts((items) => items.filter((item) => item.id !== event.id));
     }) || (() => {});
-    return unsub;
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, []);
 
-  const categories = useMemo(() => [...new Set(products.map(p => p.category).filter(Boolean))], [products]);
-  const categoryCards = useMemo(() => {
+  const categories = useMemo(() => {
+    const names = [...new Set(products.map((product) => product.category).filter(Boolean))];
     const map = new Map();
-    categories.forEach((name) => {
-      const firstProduct = products.find((p) => p.category === name && p.image_url);
+
+    names.forEach((name) => {
+      const firstProductImage = products.find((product) => product.category === name && product.image_url)?.image_url;
       map.set(name, {
         name,
-        image_url: firstProduct?.image_url || "",
+        image_url: firstProductImage || "",
         description: "",
-        count: products.filter((p) => p.category === name).length,
-        is_active: true,
+        sort_order: 999,
+        count: products.filter((product) => product.category === name).length,
       });
     });
-    categoryRecords.forEach((cat) => {
-      if (cat.is_active === false) return;
-      map.set(cat.name, {
-        ...map.get(cat.name),
-        ...cat,
-        count: products.filter((p) => p.category === cat.name).length,
+
+    categoryRecords.forEach((category) => {
+      if (category.is_active === false) return;
+      map.set(category.name, {
+        ...map.get(category.name),
+        ...category,
+        count: products.filter((product) => product.category === category.name).length,
       });
     });
-    return Array.from(map.values()).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
-  }, [categories, categoryRecords, products]);
 
-  const filtered = useMemo(() => products.filter(p => {
-    if (activeCategory !== "all" && p.category !== activeCategory) return false;
-    if (search && !p.name?.toLowerCase().includes(search.toLowerCase()) &&
-        !p.description?.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  }), [products, activeCategory, search]);
+    return [...map.values()].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
+  }, [categoryRecords, products]);
 
-  const cartSubtotal = cart.reduce((s, i) => s + i.total, 0);
+  const filteredProducts = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return products.filter((product) => {
+      if (activeCategory !== "all" && product.category !== activeCategory) return false;
+      if (!normalizedSearch) return true;
+      return [product.name, product.description, product.code, product.category]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(normalizedSearch));
+    });
+  }, [activeCategory, products, search]);
+
+  const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0);
   const discountAmount = appliedDiscount
     ? appliedDiscount.discount_type === "percentage"
-      ? Math.round(cartSubtotal * appliedDiscount.discount_value / 100)
-      : appliedDiscount.discount_value
+      ? Math.round(cartSubtotal * Number(appliedDiscount.discount_value || 0) / 100)
+      : Number(appliedDiscount.discount_value || 0)
     : 0;
   const cartTotal = Math.max(0, cartSubtotal - discountAmount);
-  const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   const addToCart = (product) => {
-    const price = product[PRICE_KEY] || 0;
-    const stock = product[STOCK_KEY] || 0;
-    setCart(prev => {
-      const existing = prev.find(i => i.product_id === product.id);
+    const price = Number(product[meta.priceKey] || 0);
+    const stock = Number(product[meta.stockKey] || 0);
+    if (stock <= 0) {
+      toast.error("المنتج غير متوفر حاليًا");
+      return;
+    }
+
+    playTapSound();
+    setCart((current) => {
+      const existing = current.find((item) => item.product_id === product.id);
       if (existing) {
-        if (existing.quantity >= stock) { toast.error("لا يوجد مخزون كافٍ"); return prev; }
-        return prev.map(i => i.product_id === product.id ? { ...i, quantity: i.quantity + 1, total: (i.quantity + 1) * price } : i);
+        if (existing.quantity >= stock) {
+          toast.error("لا يوجد مخزون إضافي لهذا المنتج");
+          return current;
+        }
+        return current.map((item) =>
+          item.product_id === product.id
+            ? { ...item, quantity: item.quantity + 1, total: (item.quantity + 1) * item.unit_price }
+            : item
+        );
       }
-      return [...prev, { product_id: product.id, product_name: product.name, quantity: 1, unit_price: price, total: price, image_url: product.image_url, max_stock: stock }];
+      return [
+        ...current,
+        {
+          product_id: product.id,
+          product_name: product.name,
+          quantity: 1,
+          unit_price: price,
+          total: price,
+          image_url: product.image_url,
+          max_stock: stock,
+        },
+      ];
     });
-    toast.success("أُضيف للسلة", { description: product.name, duration: 1500 });
   };
 
-  const removeFromCart = (id) => setCart(prev => prev.filter(i => i.product_id !== id));
+  const updateQty = (productId, delta) => {
+    playTapSound();
+    setCart((current) =>
+      current
+        .map((item) => {
+          if (item.product_id !== productId) return item;
+          const nextQuantity = item.quantity + delta;
+          if (nextQuantity <= 0) return null;
+          if (nextQuantity > item.max_stock) {
+            toast.error("الكمية المطلوبة أكبر من المخزون");
+            return item;
+          }
+          return { ...item, quantity: nextQuantity, total: nextQuantity * item.unit_price };
+        })
+        .filter(Boolean)
+    );
+  };
 
-  const updateQty = (id, delta) => {
-    setCart(prev => prev.map(i => {
-      if (i.product_id !== id) return i;
-      const qty = i.quantity + delta;
-      if (qty <= 0) return null;
-      if (qty > i.max_stock) { toast.error("لا يوجد مخزون كافٍ"); return i; }
-      return { ...i, quantity: qty, total: qty * i.unit_price };
-    }).filter(Boolean));
+  const removeFromCart = (productId) => {
+    playTapSound();
+    setCart((current) => current.filter((item) => item.product_id !== productId));
+  };
+
+  const applyDiscount = async () => {
+    if (!discountCode.trim()) return;
+    setCheckingCode(true);
+    try {
+      const codes = await db.entities.DiscountCode.filter({ code: discountCode.trim().toUpperCase() });
+      const code = codes?.[0];
+      if (!code) {
+        toast.error("كود الخصم غير صحيح");
+        return;
+      }
+      if (!code.is_active) {
+        toast.error("كود الخصم غير مفعل");
+        return;
+      }
+      if (code.expiry_date && new Date(code.expiry_date) < new Date()) {
+        toast.error("انتهت صلاحية كود الخصم");
+        return;
+      }
+      if (code.max_uses && code.used_count >= code.max_uses) {
+        toast.error("تم استهلاك كود الخصم");
+        return;
+      }
+      if (code.branch !== "both" && code.branch !== branch) {
+        toast.error("هذا الكود غير متاح لهذا الفرع");
+        return;
+      }
+      setAppliedDiscount(code);
+      toast.success("تم تطبيق الخصم");
+    } catch (error) {
+      toast.error("تعذر التحقق من كود الخصم");
+    } finally {
+      setCheckingCode(false);
+    }
   };
 
   const handleReceiptUpload = async (file) => {
@@ -148,607 +295,447 @@ export default function Menu() {
     try {
       const { file_url } = await db.integrations.Core.UploadFile({ file });
       setReceiptUrl(file_url);
-      toast.success("تم رفع الإيصال ✓");
-    } catch { toast.error("فشل رفع الإيصال"); }
-    setUploadingReceipt(false);
+      toast.success("تم رفع الإيصال");
+    } catch (error) {
+      toast.error("تعذر رفع الإيصال");
+    } finally {
+      setUploadingReceipt(false);
+    }
   };
 
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) { toast.error("المتصفح لا يدعم تحديد الموقع"); return; }
+  const getLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error("المتصفح لا يدعم تحديد الموقع");
+      return;
+    }
     setGettingLocation(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const url = `https://maps.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-        setLocationUrl(url);
+      (position) => {
+        setLocationUrl(`https://maps.google.com/maps?q=${position.coords.latitude},${position.coords.longitude}`);
         setGettingLocation(false);
-        toast.success("تم تحديد موقعك ✓");
+        toast.success("تم تحديد الموقع");
       },
-      () => { toast.error("تعذّر تحديد الموقع"); setGettingLocation(false); }
+      () => {
+        setGettingLocation(false);
+        toast.error("تعذر تحديد الموقع");
+      }
     );
   };
 
-  const handleApplyDiscount = async () => {
-    if (!discountCode.trim()) return;
-    setCheckingCode(true);
-    try {
-      const codes = await db.entities.DiscountCode.filter({ code: discountCode.trim().toUpperCase() });
-      const code = codes?.[0];
-      if (!code) { toast.error("كود الخصم غير صحيح"); setCheckingCode(false); return; }
-      if (!code.is_active) { toast.error("هذا الكود غير مفعّل"); setCheckingCode(false); return; }
-      if (code.expiry_date && new Date(code.expiry_date) < new Date()) { toast.error("انتهت صلاحية الكود"); setCheckingCode(false); return; }
-      if (code.max_uses && code.used_count >= code.max_uses) { toast.error("تم استنفاد هذا الكود"); setCheckingCode(false); return; }
-      if (code.branch !== "both" && code.branch !== BRANCH) { toast.error("هذا الكود غير متاح لفرعك"); setCheckingCode(false); return; }
-      setAppliedDiscount(code);
-      toast.success(`✓ تم تطبيق الخصم: ${code.discount_type === "percentage" ? code.discount_value + "%" : code.discount_value + " " + CURRENCY}`);
-    } catch { toast.error("خطأ في التحقق من الكود"); }
-    setCheckingCode(false);
-  };
-
-  const handleSubmit = async () => {
-    if (!form.name.trim() || !form.phone.trim()) { toast.error("يرجى إدخال الاسم ورقم الجوال"); return; }
-    setSubmitting(true);
-    let customerId = null;
-    try {
-      const existing = await db.entities.Customer.filter({ phone: form.phone.trim(), branch: BRANCH });
-      if (existing?.length > 0) customerId = existing[0].id;
-      else { const nc = await db.entities.Customer.create({ name: form.name.trim(), phone: form.phone.trim(), city: form.city.trim(), branch: BRANCH }); customerId = nc.id; }
-    } catch { const nc = await db.entities.Customer.create({ name: form.name.trim(), phone: form.phone.trim(), city: form.city.trim(), branch: BRANCH }); customerId = nc.id; }
-
-    // تحديث عداد استخدام كود الخصم
-    if (appliedDiscount) {
-      await db.entities.DiscountCode.update(appliedDiscount.id, { used_count: (appliedDiscount.used_count || 0) + 1 });
+  const submitOrder = async () => {
+    if (!cart.length) {
+      toast.error("السلة فارغة");
+      return;
+    }
+    if (!form.name.trim() || !form.phone.trim()) {
+      toast.error("أدخل الاسم ورقم الجوال لإتمام الطلب");
+      return;
     }
 
-    await db.entities.Order.create({
-      customer_name: form.name.trim(), customer_phone: form.phone.trim(), customer_city: form.city.trim(),
-      branch: BRANCH,
-      items: cart.map(i => ({ product_id: i.product_id, product_name: i.product_name, quantity: i.quantity, unit_price: i.unit_price, total: i.total })),
-      total_amount: cartTotal,
-      status: "new",
-      notes: [
-        `[طريقة الدفع: ${paymentMethod === "cod" ? "دفع عند الاستلام" : "تحويل بنكي"}]`,
-        receiptUrl ? `[إيصال: ${receiptUrl}]` : "",
-        appliedDiscount ? `[كود خصم: ${appliedDiscount.code} - خصم ${discountAmount} ${CURRENCY}]` : "",
-        locationUrl ? `[موقع العميل: ${locationUrl}]` : "",
-        form.notes.trim(),
-      ].filter(Boolean).join("\n"),
-      customer_id: customerId,
-      customer_location_url: locationUrl || null,
-    });
+    setSubmitting(true);
+    try {
+      let customerId = null;
+      const phone = form.phone.trim();
+      const existingCustomers = await db.entities.Customer.filter({ phone, branch });
+      if (existingCustomers?.length) {
+        customerId = existingCustomers[0].id;
+      } else {
+        const createdCustomer = await db.entities.Customer.create({
+          name: form.name.trim(),
+          phone,
+          city: form.city.trim(),
+          branch,
+          notes: "تم إنشاؤه تلقائيًا من الكتالوج العام",
+        });
+        customerId = createdCustomer.id;
+      }
 
-    const payText = paymentMethod === "cod" ? "💵 الدفع: عند الاستلام" : `🏦 الدفع: تحويل بنكي${receiptUrl ? "\n✅ تم رفع الإيصال" : ""}`;
-    const itemsText = cart.map(i => `• ${i.product_name} × ${i.quantity} = ${i.total} ${CURRENCY}`).join("\n");
-    const discountText = appliedDiscount ? `\n🏷️ كود خصم: -${discountAmount} ${CURRENCY}` : "";
-    const locationText = locationUrl ? `\n📍 الموقع: ${locationUrl}` : "";
-    const waMsg = `🛍️ طلب جديد من منتجات لمحة تك!\n\n👤 ${form.name}\n📱 ${form.phone}\n🏙️ ${form.city || "—"}\n\n📦 المنتجات:\n${itemsText}\n\n💰 المجموع: ${cartSubtotal} ${CURRENCY}${discountText}\n✅ الإجمالي: ${cartTotal} ${CURRENCY}\n${payText}${locationText}\n📝 ${form.notes || "—"}`;
+      if (appliedDiscount) {
+        await db.entities.DiscountCode.update(appliedDiscount.id, {
+          used_count: Number(appliedDiscount.used_count || 0) + 1,
+        });
+      }
 
-    const storePhone = BRANCH_WHATSAPP[BRANCH] || BRANCH_WHATSAPP.saudi;
-    window.open(`https://wa.me/${storePhone}?text=${encodeURIComponent(waMsg)}`, "_blank");
+      await db.entities.Order.create({
+        customer_name: form.name.trim(),
+        customer_phone: phone,
+        customer_city: form.city.trim(),
+        branch,
+        items: cart.map((item) => ({
+          product_id: item.product_id,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          total: item.total,
+        })),
+        total_amount: cartTotal,
+        status: "new",
+        notes: [
+          `طريقة الدفع: ${paymentMethod === "cod" ? "الدفع عند الاستلام" : "تحويل بنكي"}`,
+          receiptUrl ? `إيصال التحويل: ${receiptUrl}` : "",
+          appliedDiscount ? `كود الخصم: ${appliedDiscount.code} - خصم ${formatMoney(discountAmount, meta.currency)}` : "",
+          locationUrl ? `موقع العميل: ${locationUrl}` : "",
+          form.notes.trim(),
+        ].filter(Boolean).join("\n"),
+        customer_id: customerId,
+        customer_location_url: locationUrl || null,
+      });
 
-    setStep(STEP_SUCCESS);
-    setSubmitting(false);
+      const itemsText = cart.map((item) => `• ${item.product_name} × ${item.quantity} = ${formatMoney(item.total, meta.currency)}`).join("\n");
+      const whatsappText = [
+        "طلب جديد من كتالوج لمحاتك",
+        "",
+        `الفرع: ${meta.flag} ${meta.label}`,
+        `العميل: ${form.name.trim()}`,
+        `الجوال: ${phone}`,
+        `المدينة: ${form.city.trim() || "-"}`,
+        "",
+        "المنتجات:",
+        itemsText,
+        "",
+        `المجموع: ${formatMoney(cartSubtotal, meta.currency)}`,
+        appliedDiscount ? `الخصم: -${formatMoney(discountAmount, meta.currency)} (${appliedDiscount.code})` : "",
+        `الإجمالي: ${formatMoney(cartTotal, meta.currency)}`,
+        `الدفع: ${paymentMethod === "cod" ? "الدفع عند الاستلام" : "تحويل بنكي"}`,
+        receiptUrl ? `الإيصال: ${receiptUrl}` : "",
+        locationUrl ? `الموقع: ${locationUrl}` : "",
+        form.notes.trim() ? `ملاحظات: ${form.notes.trim()}` : "",
+      ].filter(Boolean).join("\n");
+
+      window.open(`https://wa.me/${STORE_WHATSAPP[branch]}?text=${encodeURIComponent(whatsappText)}`, "_blank");
+      setStep("success");
+    } catch (error) {
+      toast.error("تعذر إرسال الطلب، حاول مرة أخرى");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  // ── SUCCESS ──────────────────────────────────────────────────────────────────
-  if (step === STEP_SUCCESS) return (
-    <div className="min-h-screen flex items-center justify-center p-6" dir="rtl"
-      style={{ background: "linear-gradient(160deg,#0b1120 0%,#1a2744 60%,#0b1120 100%)" }}>
-      <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: "spring", bounce: 0.45, duration: 0.7 }} className="text-center max-w-xs w-full">
-        <div className="relative w-36 h-36 mx-auto mb-8">
-          <div className="absolute inset-0 rounded-full bg-emerald-400/10 animate-ping" style={{ animationDuration: "2.5s" }} />
-          <div className="absolute inset-4 rounded-full bg-emerald-400/10 animate-ping" style={{ animationDuration: "2.5s", animationDelay: "0.4s" }} />
-          <div className="relative w-36 h-36 rounded-full flex items-center justify-center shadow-2xl shadow-emerald-500/30"
-            style={{ background: "linear-gradient(135deg,#10b981,#059669)" }}>
-            <CheckCircle2 style={{ width: 72, height: 72 }} className="text-white" strokeWidth={1.5} />
-          </div>
-        </div>
-        <h2 className="text-3xl font-black text-white mb-2">تم إرسال طلبك! 🎉</h2>
-        <p className="text-slate-400 text-sm mb-6">سيتواصل معك فريقنا قريباً</p>
-        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 mb-8 flex items-center justify-center gap-2">
-          <MessageCircle className="w-4 h-4 text-emerald-400" />
-          <p className="text-emerald-400 text-sm font-bold">تم فتح واتساب للتأكيد</p>
-        </div>
-        <button onClick={() => { setStep(STEP_MENU); setCart([]); setForm({ name:"",phone:"",city:"",notes:"" }); setPaymentMethod("cod"); setReceiptUrl(""); setLocationUrl(""); setDiscountCode(""); setAppliedDiscount(null); }}
-          className="w-full py-4 rounded-2xl font-black text-slate-900 text-base active:scale-95 transition-all shadow-xl"
-          style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>
-          تصفح المزيد
-        </button>
-      </motion.div>
-    </div>
-  );
+  const resetOrder = () => {
+    setCart([]);
+    setStep("menu");
+    setForm({ name: "", phone: "", city: "", notes: "" });
+    setLocationUrl("");
+    setPaymentMethod("cod");
+    setReceiptUrl("");
+    setDiscountCode("");
+    setAppliedDiscount(null);
+  };
 
-  // ── INFO STEP ────────────────────────────────────────────────────────────────
-  if (step === STEP_INFO) return (
-    <div className="min-h-screen bg-slate-50" dir="rtl">
-      <div className="sticky top-0 z-20 border-b border-slate-100 px-4 py-3.5 flex items-center gap-3 bg-white shadow-sm">
-        <button onClick={() => setStep(STEP_CART)} className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
-          <ChevronRight className="w-5 h-5 text-slate-600" />
-        </button>
-        <div className="flex-1">
-          <h1 className="font-black text-slate-900 text-base">إتمام الطلب</h1>
-          <p className="text-xs text-slate-400">أدخل بياناتك لإرسال طلبك</p>
+  if (step === "success") {
+    return (
+      <main className="min-h-screen bg-[#f6f7f2] px-4 py-8 text-slate-950" dir="rtl">
+        <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md flex-col items-center justify-center text-center">
+          <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <CheckCircle2 className="h-12 w-12" />
+          </div>
+          <h1 className="text-3xl font-black">تم إرسال طلبك</h1>
+          <p className="mt-3 text-sm leading-7 text-slate-600">
+            وصل الطلب للنظام، وفتحنا رسالة واتساب جاهزة للمتجر لمتابعة الطلب بسرعة.
+          </p>
+          <button onClick={resetOrder} className="mt-8 h-12 w-full rounded-lg bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800">
+            الرجوع للكتالوج
+          </button>
         </div>
-        <span className="bg-amber-100 text-amber-700 text-xs font-black px-3 py-1.5 rounded-xl">{cartCount} منتج</span>
-      </div>
+      </main>
+    );
+  }
 
-      <div className="max-w-lg mx-auto px-4 py-5 space-y-4 pb-36">
-        {/* Summary */}
-        <div className="bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-100">
-          <div className="px-5 py-3.5 border-b border-slate-50 flex justify-between items-center">
-            <span className="font-black text-slate-800 text-sm">ملخص الطلب</span>
-            <span className="text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">{cartCount} منتج</span>
-          </div>
-          <div className="p-4 space-y-3">
-            {cart.map(item => (
-              <div key={item.product_id} className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-100 shrink-0">
-                  {item.image_url ? <img src={item.image_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center">📦</div>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm text-slate-900 truncate">{item.product_name}</p>
-                  <p className="text-xs text-slate-400">{item.unit_price} {CURRENCY} × {item.quantity}</p>
-                </div>
-                <p className="font-black text-amber-600 text-sm shrink-0">{item.total} {CURRENCY}</p>
-              </div>
-            ))}
-            <div className="pt-3 border-t border-slate-50 space-y-1">
-              <div className="flex justify-between text-sm text-slate-500">
-                <span>المجموع</span><span>{cartSubtotal} {CURRENCY}</span>
-              </div>
-              {appliedDiscount && (
-                <div className="flex justify-between text-sm text-emerald-600 font-bold">
-                  <span>خصم ({appliedDiscount.code})</span><span>- {discountAmount} {CURRENCY}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-black text-slate-900 text-lg pt-1 border-t border-slate-50">
-                <span>الإجمالي</span>
-                <span>{cartTotal} <span className="text-sm text-slate-400">{CURRENCY}</span></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Form */}
-        <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 space-y-3">
-          <h3 className="font-black text-slate-800 text-sm">بياناتك الشخصية</h3>
-          {[{ icon: User, ph: "الاسم الكامل *", key: "name", type: "text", dir: "rtl" },
-            { icon: Phone, ph: "رقم الجوال *", key: "phone", type: "tel", dir: "ltr" },
-            { icon: MapPin, ph: "المدينة", key: "city", type: "text", dir: "rtl" }].map(({ icon: Icon, ph, key, type, dir }) => (
-            <div key={key} className="relative">
-              <Icon className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-              <input type={type} dir={dir} placeholder={ph} value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })}
-                className="w-full pr-10 pl-4 py-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 focus:bg-white transition-all placeholder:text-slate-300 text-slate-800" />
-            </div>
-          ))}
-          <div className="relative">
-            <FileText className="absolute right-3.5 top-3.5 w-4 h-4 text-slate-300" />
-            <textarea placeholder="ملاحظات (اختياري)..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
-              rows={2} className="w-full pr-10 pl-4 py-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-300 focus:bg-white transition-all placeholder:text-slate-300 text-slate-800" />
-          </div>
-
-          {/* Location */}
-          {locationUrl ? (
-            <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-2xl">
-              <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
-              <p className="text-blue-700 font-bold text-sm flex-1">تم تحديد موقعك ✓</p>
-              <button onClick={() => setLocationUrl("")} className="text-xs text-slate-400 underline">إزالة</button>
-            </div>
-          ) : (
-            <button onClick={handleGetLocation} disabled={gettingLocation}
-              className="w-full flex items-center gap-3 p-3.5 rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-300 hover:bg-blue-50/30 transition-all text-right">
-              <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
-                {gettingLocation ? <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /> : <Navigation className="w-5 h-5 text-slate-400" />}
-              </div>
-              <div>
-                <p className="font-bold text-sm text-slate-700">{gettingLocation ? "جاري تحديد الموقع..." : "تحديد موقعي على الخريطة"}</p>
-                <p className="text-xs text-slate-400">اختياري · لتسهيل التوصيل</p>
-              </div>
+  if (step === "cart" || step === "checkout") {
+    return (
+      <main className="min-h-screen bg-[#f6f7f2] text-slate-950" dir="rtl">
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/92 px-4 py-3 backdrop-blur">
+          <div className="mx-auto flex max-w-5xl items-center gap-3">
+            <button onClick={() => setStep("menu")} className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+              <ChevronRight className="h-5 w-5" />
             </button>
-          )}
-        </div>
-
-        {/* Discount Code */}
-        <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
-          <h3 className="font-black text-slate-800 text-sm mb-3 flex items-center gap-2"><Tag className="w-4 h-4 text-amber-500" />كود الخصم</h3>
-          {appliedDiscount ? (
-            <div className="flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-2xl">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-              <div className="flex-1">
-                <p className="text-emerald-700 font-black text-sm">{appliedDiscount.code}</p>
-                <p className="text-emerald-600 text-xs">وفّرت {discountAmount} {CURRENCY}</p>
-              </div>
-              <button onClick={() => { setAppliedDiscount(null); setDiscountCode(""); }} className="text-xs text-slate-400 underline">إزالة</button>
+            <div className="flex-1">
+              <p className="text-xs font-bold text-slate-500">{meta.flag} {meta.label}</p>
+              <h1 className="text-lg font-black">{step === "cart" ? "مراجعة الطلب" : "إتمام الطلب"}</h1>
             </div>
-          ) : (
-            <div className="flex gap-2">
-              <input value={discountCode} onChange={e => setDiscountCode(e.target.value.toUpperCase())}
-                placeholder="أدخل كود الخصم..."
-                className="flex-1 px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 focus:bg-white transition-all placeholder:text-slate-300 text-slate-800 font-mono" />
-              <button onClick={handleApplyDiscount} disabled={checkingCode || !discountCode.trim()}
-                className="px-4 py-3 rounded-2xl font-black text-sm text-white disabled:opacity-50 transition-all active:scale-95"
-                style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>
-                {checkingCode ? "..." : "تطبيق"}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Payment */}
-        <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
-          <h3 className="font-black text-slate-800 text-sm mb-3">طريقة الدفع</h3>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            {PAYMENT_METHODS.map(({ id, label, icon: Icon }) => {
-              const sel = paymentMethod === id;
-              return (
-                <button key={id} onClick={() => setPaymentMethod(id)}
-                  className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${sel ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}>
-                  {sel && <div className="absolute top-2 left-2 w-4 h-4 bg-amber-400 rounded-full flex items-center justify-center"><div className="w-1.5 h-1.5 bg-white rounded-full" /></div>}
-                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${sel ? "text-white shadow-lg shadow-amber-200" : "bg-slate-200 text-slate-500"}`}
-                    style={sel ? { background: "linear-gradient(135deg,#fbbf24,#f59e0b)" } : {}}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <span className={`font-black text-xs text-center leading-tight ${sel ? "text-amber-800" : "text-slate-700"}`}>{label}</span>
-                </button>
-              );
-            })}
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">{cartCount} منتج</span>
           </div>
+        </header>
 
-          <AnimatePresence>
-            {paymentMethod === "transfer" && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden space-y-3">
-                <div className="rounded-2xl p-4" style={{ background: "linear-gradient(135deg,#0f172a,#1e293b)" }}>
-                  <p className="text-amber-400 text-xs font-black mb-3 flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5" />بيانات الحساب</p>
-                  {[["الاسم", BANK_INFO.name, "rtl"], ["IBAN", BANK_INFO.iban, "ltr"], ["العملة", BANK_INFO.currency, "rtl"]].map(([label, val, d]) => (
-                    <div key={label} className="flex justify-between items-center py-1.5 border-b border-white/5 last:border-0">
-                      <span className="text-slate-500 text-xs">{label}</span>
-                      <span className={`font-bold text-xs ${label === "IBAN" ? "text-amber-400 font-mono text-white" : "text-white"}`} dir={d}>{val}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={e => handleReceiptUpload(e.target.files[0])} />
-                {receiptUrl ? (
-                  <div className="flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-2xl">
-                    <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0"><img src={receiptUrl} className="w-full h-full object-cover" /></div>
-                    <div>
-                      <p className="text-emerald-700 font-black text-sm">✓ تم رفع الإيصال</p>
-                      <button onClick={() => { setReceiptUrl(""); if (fileInputRef.current) fileInputRef.current.value = ""; }} className="text-xs text-slate-400 underline">إزالة</button>
+        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[1fr_380px]">
+          <section className="space-y-3">
+            {cart.length === 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-8 text-center">
+                <ShoppingCart className="mx-auto h-10 w-10 text-slate-300" />
+                <p className="mt-3 font-black">السلة فارغة</p>
+              </div>
+            ) : (
+              cart.map((item) => (
+                <article key={item.product_id} className="grid grid-cols-[76px_1fr] gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-[92px_1fr_auto]">
+                  <div className="h-20 overflow-hidden rounded-lg bg-slate-100 sm:h-24">
+                    {item.image_url ? <img src={item.image_url} alt="" className="h-full w-full object-cover" /> : <ImageIcon className="mx-auto mt-7 h-7 w-7 text-slate-300" />}
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="truncate text-sm font-black sm:text-base">{item.product_name}</h2>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">{formatMoney(item.unit_price, meta.currency)} للقطعة</p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <button onClick={() => updateQty(item.product_id, -1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100">
+                        <Minus className="h-4 w-4" />
+                      </button>
+                      <span className="w-8 text-center text-sm font-black">{item.quantity}</span>
+                      <button onClick={() => updateQty(item.product_id, 1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white">
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      <button onClick={() => removeFromCart(item.product_id)} className="mr-auto flex h-9 w-9 items-center justify-center rounded-lg bg-red-50 text-red-600">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
-                ) : (
-                  <button onClick={() => fileInputRef.current.click()} disabled={uploadingReceipt}
-                    className="w-full flex items-center gap-3 p-3.5 rounded-2xl border-2 border-dashed border-slate-200 hover:border-amber-300 hover:bg-amber-50/30 transition-all text-right">
-                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
-                      {uploadingReceipt ? <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" /> : <Camera className="w-5 h-5 text-slate-400" />}
-                    </div>
-                    <div>
-                      <p className="font-bold text-sm text-slate-700">{uploadingReceipt ? "جاري الرفع..." : "إرفاق إيصال التحويل"}</p>
-                      <p className="text-xs text-slate-400">اختياري · اضغط لرفع صورة</p>
-                    </div>
-                  </button>
-                )}
-              </motion.div>
+                  <div className="col-span-2 flex items-center justify-between border-t border-slate-100 pt-3 sm:col-span-1 sm:block sm:border-t-0 sm:pt-0 sm:text-left">
+                    <span className="text-xs font-bold text-slate-400 sm:hidden">الإجمالي</span>
+                    <p className="font-black text-slate-950">{formatMoney(item.total, meta.currency)}</p>
+                  </div>
+                </article>
+              ))
             )}
-          </AnimatePresence>
-        </div>
-      </div>
+          </section>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur-xl border-t border-slate-100">
-        <button onClick={handleSubmit} disabled={submitting}
-          className="w-full max-w-lg mx-auto py-4 rounded-2xl font-black text-base flex items-center justify-center gap-3 disabled:opacity-60 active:scale-[0.98] transition-all shadow-xl block text-white"
-          style={{ background: "linear-gradient(135deg,#25D366,#128C7E)" }}>
-          {submitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <MessageCircle className="w-5 h-5" />}
-          {submitting ? "جاري الإرسال..." : "تأكيد الطلب عبر واتساب"}
-        </button>
-      </div>
-    </div>
-  );
+          <aside className="space-y-4">
+            {step === "checkout" && (
+              <>
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="mb-3 text-base font-black">بيانات العميل</h2>
+                  <div className="space-y-3">
+                    <Field icon={User} placeholder="الاسم الكامل" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
+                    <Field icon={Phone} placeholder="رقم الجوال" value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} dir="ltr" />
+                    <Field icon={MapPin} placeholder="المدينة" value={form.city} onChange={(value) => setForm({ ...form, city: value })} />
+                    <label className="relative block">
+                      <FileText className="absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
+                      <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} rows={3} placeholder="ملاحظات إضافية" className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 py-3 pl-3 pr-10 text-sm outline-none transition focus:border-amber-500 focus:bg-white focus:ring-2 focus:ring-amber-100" />
+                    </label>
+                    <button onClick={getLocation} disabled={gettingLocation} className="flex w-full items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-right text-sm font-bold text-slate-700">
+                      {gettingLocation ? <Loader2 className="h-5 w-5 animate-spin text-amber-600" /> : locationUrl ? <Check className="h-5 w-5 text-emerald-600" /> : <Navigation className="h-5 w-5 text-slate-500" />}
+                      {locationUrl ? "تم تحديد الموقع" : "إضافة الموقع للتوصيل"}
+                    </button>
+                  </div>
+                </section>
 
-  // ── CART STEP ────────────────────────────────────────────────────────────────
-  if (step === STEP_CART) return (
-    <div className="min-h-screen bg-slate-50" dir="rtl">
-      <div className="sticky top-0 z-20 bg-white border-b border-slate-100 px-4 py-3.5 flex items-center gap-3 shadow-sm">
-        <button onClick={() => setStep(STEP_MENU)} className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
-          <ChevronRight className="w-5 h-5 text-slate-600" />
-        </button>
-        <div className="flex-1">
-          <h1 className="font-black text-slate-900 text-base">سلة الطلب</h1>
-          <p className="text-xs text-slate-400">{cartCount} منتج · {cartTotal} {CURRENCY}</p>
-        </div>
-      </div>
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="mb-3 text-base font-black">الدفع والخصم</h2>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PAYMENT_METHODS.map((method) => {
+                      const Icon = method.icon;
+                      const active = paymentMethod === method.id;
+                      return (
+                        <button key={method.id} onClick={() => setPaymentMethod(method.id)} className={`rounded-lg border p-3 text-right transition ${active ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                          <Icon className="mb-2 h-5 w-5" />
+                          <p className="text-xs font-black">{method.label}</p>
+                          <p className={`mt-1 text-[11px] ${active ? "text-white/60" : "text-slate-400"}`}>{method.caption}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-      <div className="max-w-lg mx-auto px-4 py-4 space-y-3 pb-40">
-        <AnimatePresence>
-          {cart.map(item => (
-            <motion.div key={item.product_id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -60, height: 0, margin: 0, padding: 0 }}
-              className="bg-white rounded-3xl p-4 flex items-center gap-4 shadow-sm border border-slate-100">
-              <div className="w-20 h-20 rounded-2xl bg-slate-100 overflow-hidden shrink-0">
-                {item.image_url ? <img src={item.image_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-2xl">📦</div>}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-black text-slate-900 text-sm mb-1">{item.product_name}</p>
-                <p className="text-xs text-slate-400 mb-3">{item.unit_price} {CURRENCY} / قطعة</p>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => updateQty(item.product_id, -1)} className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors">
-                    <Minus className="w-3.5 h-3.5 text-slate-600" />
-                  </button>
-                  <span className="font-black text-slate-900 text-sm w-7 text-center">{item.quantity}</span>
-                  <button onClick={() => updateQty(item.product_id, 1)} className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
-                    style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>
-                    <Plus className="w-3.5 h-3.5 text-white" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-col items-end gap-2 shrink-0">
-                <div className="text-right">
-                  <p className="font-black text-slate-900 text-lg leading-none">{item.total}</p>
-                  <p className="text-xs text-amber-500 font-bold">{CURRENCY}</p>
-                </div>
-                <button onClick={() => removeFromCart(item.product_id)} className="w-8 h-8 rounded-xl bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors mt-1">
-                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                  {paymentMethod === "transfer" && (
+                    <div className="mt-3 rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs font-black text-slate-600">بيانات التحويل</p>
+                      <p className="mt-2 text-xs text-slate-500">الاسم: <span className="font-bold text-slate-900">{BANK_INFO.name}</span></p>
+                      <p className="mt-1 text-xs text-slate-500">IBAN: <span className="font-mono font-bold text-slate-900" dir="ltr">{BANK_INFO.iban}</span></p>
+                      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => handleReceiptUpload(event.target.files?.[0])} />
+                      <button onClick={() => fileInputRef.current?.click()} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-xs font-black">
+                        {uploadingReceipt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                        {receiptUrl ? "تم رفع الإيصال" : "رفع إيصال التحويل"}
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex gap-2">
+                    <input value={discountCode} onChange={(event) => setDiscountCode(event.target.value.toUpperCase())} placeholder="كود الخصم" className="h-11 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-amber-500" />
+                    <button onClick={applyDiscount} disabled={checkingCode} className="h-11 rounded-lg bg-amber-500 px-4 text-xs font-black text-white">
+                      {checkingCode ? "..." : "تطبيق"}
+                    </button>
+                  </div>
+                </section>
+              </>
+            )}
+
+            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 text-base font-black">ملخص الطلب</h2>
+              <SummaryRow label="المجموع" value={formatMoney(cartSubtotal, meta.currency)} />
+              {appliedDiscount && <SummaryRow label={`خصم ${appliedDiscount.code}`} value={`- ${formatMoney(discountAmount, meta.currency)}`} tone="success" />}
+              <div className="my-3 border-t border-slate-100" />
+              <SummaryRow label="الإجمالي" value={formatMoney(cartTotal, meta.currency)} strong />
+              {step === "cart" ? (
+                <button onClick={() => setStep("checkout")} disabled={!cart.length} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-slate-950 text-sm font-black text-white disabled:bg-slate-300">
+                  متابعة الطلب <ArrowLeft className="h-4 w-4" />
                 </button>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {cart.length === 0 && (
-          <div className="text-center py-24">
-            <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center mx-auto mb-5 shadow-sm border border-slate-100">
-              <ShoppingCart className="w-12 h-12 text-slate-200" />
-            </div>
-            <p className="font-black text-slate-700 text-lg mb-1">سلتك فارغة</p>
-            <p className="text-slate-400 text-sm mb-5">ابدأ بإضافة منتجات</p>
-            <button onClick={() => setStep(STEP_MENU)} className="font-black text-amber-600 text-sm underline underline-offset-4">تصفح المنتجات</button>
-          </div>
-        )}
-      </div>
-
-      {cart.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur-xl border-t border-slate-100 shadow-2xl">
-          <div className="max-w-lg mx-auto space-y-3">
-            <div className="flex justify-between items-center px-1">
-              <span className="text-slate-500 text-sm font-semibold">الإجمالي</span>
-              <span className="font-black text-slate-900 text-2xl">{cartTotal} <span className="text-sm text-slate-400">{CURRENCY}</span></span>
-            </div>
-            <button onClick={() => setStep(STEP_INFO)}
-              className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-xl text-white"
-              style={{ background: "linear-gradient(135deg,#0f172a,#1e293b)" }}>
-              متابعة لإتمام الطلب <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
+              ) : (
+                <button onClick={submitOrder} disabled={submitting || !cart.length} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-black text-white disabled:bg-slate-300">
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingBag className="h-4 w-4" />}
+                  تأكيد الطلب
+                </button>
+              )}
+            </section>
+          </aside>
         </div>
-      )}
-    </div>
-  );
+      </main>
+    );
+  }
 
-  // ── MAIN MENU ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen" dir="rtl" style={{ background: "#f1f5f9" }}>
-
-      <div className="relative overflow-hidden" style={{ background: "linear-gradient(160deg,#0b1120 0%,#1a2744 100%)" }}>
-        <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full opacity-[0.08]"
-          style={{ background: "radial-gradient(circle,#f59e0b,transparent)" }} />
-        <div className="absolute -bottom-16 -left-16 w-60 h-60 rounded-full opacity-[0.06]"
-          style={{ background: "radial-gradient(circle,#818cf8,transparent)" }} />
-
-        <div className="relative px-5 pt-12 pb-4">
-          <div className="flex items-center justify-between mb-7">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20"
-                style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)" }}>
-                <Sparkles style={{ width: 22, height: 22 }} className="text-white" />
-              </div>
-              <div>
-                <p className="text-white font-black text-lg leading-tight tracking-tight">منتجات لمحة تك</p>
-                <p className="text-amber-400/60 text-[11px] font-semibold">{BRANCH_FLAG} {BRANCH_LABEL}</p>
-              </div>
+    <main className="min-h-screen bg-[#f6f7f2] text-slate-950" dir="rtl">
+      <section className="border-b border-slate-200 bg-white">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 py-6 lg:grid-cols-[1fr_360px] lg:px-6">
+          <div className="flex flex-col justify-center">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-black text-amber-800">
+                <Sparkles className="h-4 w-4" /> كتالوج عام للطلب المباشر
+              </span>
+              <span className="inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
+                {meta.flag} فرع {meta.label}
+              </span>
             </div>
-
-            <AnimatePresence>
-              {cart.length > 0 && (
-                <motion.button initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}
-                  onClick={() => setStep(STEP_CART)}
-                  className="relative flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-slate-900 text-sm active:scale-95 transition-all shadow-xl shadow-amber-500/30"
-                  style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>
-                  <ShoppingCart className="w-4 h-4" />
-                  <span>{cartTotal} {CURRENCY}</span>
-                  <motion.span key={cartCount} initial={{ scale: 1.5 }} animate={{ scale: 1 }}
-                    className="absolute -top-2 -right-2 w-5 h-5 bg-white text-amber-600 text-[10px] font-black rounded-full flex items-center justify-center shadow border-2 border-amber-300">
-                    {cartCount}
-                  </motion.span>
-                </motion.button>
-              )}
-            </AnimatePresence>
+            <h1 className="max-w-3xl text-3xl font-black leading-tight sm:text-4xl lg:text-5xl">
+              كتالوج لمحاتك
+            </h1>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
+              اختر المنتجات المناسبة، أضف بياناتك، وسيصل الطلب مباشرة للنظام مع إشعار للإدارة.
+            </p>
           </div>
 
-          <div className="mb-5">
-            <h2 className="text-white/90 text-2xl font-black mb-1">تسوّق الآن 🛍️</h2>
-            <div className="flex items-center gap-3 text-white/30 text-xs">
-              <span className="flex items-center gap-1"><Package className="w-3.5 h-3.5" />{products.length} منتج</span>
-              <span>·</span>
-              <span className="flex items-center gap-1"><Star className="w-3.5 h-3.5 text-amber-400" fill="#fbbf24" />جودة مضمونة</span>
-              <span>·</span>
-              <span className="flex items-center gap-1"><Zap className="w-3.5 h-3.5" />توصيل سريع</span>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p className="mb-3 text-sm font-black">اختر الفرع</p>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(BRANCH_META).map(([key, item]) => (
+                <button key={key} onClick={() => { setBranch(key); setCart([]); setActiveCategory("all"); }} className={`rounded-lg border p-3 text-right transition ${branch === key ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
+                  <span className="text-xl">{item.flag}</span>
+                  <p className="mt-1 text-sm font-black">{item.label}</p>
+                </button>
+              ))}
             </div>
-          </div>
-
-          <div className="relative">
-            <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث عن منتج..."
-              className="w-full pr-11 pl-10 py-3.5 rounded-2xl text-sm focus:outline-none text-white placeholder:text-white/25 transition-all"
-              style={{ background: "rgba(255,255,255,0.07)", border: "1.5px solid rgba(255,255,255,0.08)" }} />
-            {search && (
-              <button onClick={() => setSearch("")} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70">
-                <X className="w-4 h-4" />
-              </button>
-            )}
           </div>
         </div>
+      </section>
 
-        {categoryCards.length > 0 && (
-          <div className="flex gap-3 px-5 pb-5 pt-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            {[{ name: "all", image_url: "" }, ...categoryCards].map((cat) => {
-              const active = activeCategory === cat.name;
-              return (
-                <button key={cat.name} onClick={() => setActiveCategory(cat.name)}
-                  className={`shrink-0 w-28 overflow-hidden rounded-2xl text-xs font-black transition-all text-right ${active ? "text-slate-900 shadow-lg shadow-amber-500/20 ring-2 ring-amber-300/60" : "text-white/80 hover:text-white"}`}
-                  style={active ? { background: "#fff" } : { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                  <span className="block h-14 bg-white/10 overflow-hidden">
-                    {cat.image_url ? <img src={cat.image_url} alt="" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center"><Package className="w-5 h-5 opacity-60" /></span>}
-                  </span>
-                  <span className="block px-2 py-2 truncate">{cat.name === "all" ? "كل المنتجات" : cat.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+      <section className="sticky top-0 z-20 border-b border-slate-200 bg-[#f6f7f2]/92 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 lg:px-6">
+          <label className="relative block">
+            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث عن منتج أو قسم..." className="h-12 w-full rounded-lg border border-slate-200 bg-white px-10 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100" />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </label>
 
-        {false && categories.length > 0 && (
-          <div className="flex gap-2 px-5 pb-5 pt-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            {["all", ...categories].map(cat => {
-              const active = activeCategory === cat;
-              return (
-                <button key={cat} onClick={() => setActiveCategory(cat)}
-                  className={`shrink-0 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${active ? "text-slate-900 shadow-lg shadow-amber-500/20" : "text-white/50 hover:text-white/80"}`}
-                  style={active ? { background: "linear-gradient(135deg,#fbbf24,#f59e0b)" } : { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                  {cat === "all" ? "✦ الكل" : cat}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+          {categories.length > 0 && (
+            <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+              {[{ name: "all", image_url: "", count: products.length }, ...categories].map((category) => {
+                const active = activeCategory === category.name;
+                return (
+                  <button key={category.name} onClick={() => setActiveCategory(category.name)} className={`grid min-w-[120px] grid-cols-[42px_1fr] items-center gap-2 rounded-lg border p-2 text-right transition ${active ? "border-slate-950 bg-white shadow-sm" : "border-slate-200 bg-white/70"}`}>
+                    <span className="h-10 w-10 overflow-hidden rounded-md bg-slate-100">
+                      {category.image_url ? <img src={category.image_url} alt="" className="h-full w-full object-cover" /> : <Package className="mx-auto mt-2.5 h-5 w-5 text-slate-400" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs font-black">{category.name === "all" ? "الكل" : category.name}</span>
+                      <span className="text-[11px] font-semibold text-slate-400">{category.count || 0} منتج</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
 
-      <div className="px-4 pt-5 pb-36">
-        {loadingProducts ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {[...Array(8)].map((_, i) => (
-              <div key={i} className="bg-white rounded-3xl overflow-hidden animate-pulse border border-slate-100">
-                <div className="aspect-square bg-slate-100" />
-                <div className="p-4 space-y-2">
-                  <div className="h-3 bg-slate-100 rounded-xl w-3/4" />
-                  <div className="h-3 bg-slate-50 rounded-xl w-1/2" />
-                  <div className="h-9 bg-slate-100 rounded-xl mt-2" />
-                </div>
-              </div>
+      <section className="mx-auto max-w-6xl px-4 py-5 pb-28 lg:px-6">
+        {loading ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="h-72 animate-pulse rounded-lg bg-white" />
             ))}
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-24">
-            <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center mx-auto mb-5 shadow-sm border border-slate-100">
-              <Package className="w-10 h-10 text-slate-200" />
-            </div>
-            <p className="font-black text-slate-700 text-lg mb-1">لا توجد نتائج</p>
-            <p className="text-slate-400 text-sm">جرّب تغيير الفئة أو كلمة البحث</p>
-            {search && <button onClick={() => setSearch("")} className="mt-4 text-amber-600 font-bold text-sm underline underline-offset-4">مسح البحث</button>}
+        ) : filteredProducts.length === 0 ? (
+          <div className="rounded-lg border border-slate-200 bg-white p-10 text-center">
+            <Package className="mx-auto h-10 w-10 text-slate-300" />
+            <h2 className="mt-4 text-lg font-black">لا توجد منتجات متاحة</h2>
+            <p className="mt-2 text-sm text-slate-500">جرّب فرعًا آخر أو غيّر كلمة البحث.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {filtered.map((product, idx) => {
-              const cartItem = cart.find(i => i.product_id === product.id);
-              const price = product[PRICE_KEY] || 0;
-              const stock = product[STOCK_KEY] || 0;
-              const outOfStock = stock === 0;
-              const lowStock = stock > 0 && stock <= 3;
-
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredProducts.map((product, index) => {
+              const price = Number(product[meta.priceKey] || 0);
+              const stock = Number(product[meta.stockKey] || 0);
+              const item = cart.find((cartItem) => cartItem.product_id === product.id);
               return (
-                <motion.div key={product.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(idx * 0.04, 0.4), duration: 0.35 }}
-                  className={`bg-white rounded-3xl overflow-hidden border border-slate-100 transition-all duration-300 group flex flex-col ${!outOfStock ? "hover:shadow-2xl hover:-translate-y-1.5 hover:border-slate-200" : "opacity-60"}`}
-                >
-                  <div className="aspect-square bg-slate-50 relative overflow-hidden">
-                    {product.image_url ? (
-                      <img src={product.image_url} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt={product.name} loading="lazy" />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center gap-2">
-                        <Package className="w-10 h-10 text-slate-200" />
-                      </div>
-                    )}
-                    {product.image_url && <div className="absolute inset-0 bg-gradient-to-t from-black/25 via-transparent to-transparent" />}
-                    {outOfStock && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
-                        <span className="bg-black/60 text-white text-xs font-black px-3 py-1.5 rounded-xl">نفد المخزون</span>
-                      </div>
-                    )}
-                    {lowStock && (
-                      <div className="absolute top-2.5 right-2.5">
-                        <span className="bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-xl shadow-lg shadow-red-500/40">آخر {stock}</span>
-                      </div>
-                    )}
-                    {cartItem && !outOfStock && (
-                      <motion.div key={cartItem.quantity} initial={{ scale: 1.4 }} animate={{ scale: 1 }}
-                        className="absolute top-2.5 left-2.5 w-6 h-6 rounded-full text-white text-[10px] font-black flex items-center justify-center shadow-lg"
-                        style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>
-                        {cartItem.quantity}
-                      </motion.div>
-                    )}
+                <motion.article key={product.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * 0.03, 0.25) }} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="relative aspect-[4/3] bg-slate-100">
+                    {product.image_url ? <img src={product.image_url} alt={product.name} className="h-full w-full object-cover" loading="lazy" /> : <div className="flex h-full items-center justify-center"><ImageIcon className="h-10 w-10 text-slate-300" /></div>}
+                    {stock <= 0 && <div className="absolute inset-0 flex items-center justify-center bg-black/45 text-sm font-black text-white">غير متوفر</div>}
+                    {product.category && <span className="absolute right-3 top-3 rounded-full bg-white/92 px-3 py-1 text-xs font-black text-slate-700">{product.category}</span>}
                   </div>
-
-                  <div className="p-4 flex flex-col flex-1">
-                    <h3 className="font-black text-slate-900 text-sm leading-snug line-clamp-2 mb-1">{product.name}</h3>
-                    {product.description && <p className="text-[11px] text-slate-400 line-clamp-1 mb-2">{product.description}</p>}
-                    {product.category && (
-                      <span className="self-start text-[9px] font-black text-amber-700 bg-amber-50 border border-amber-100/80 px-2 py-0.5 rounded-lg mb-3">
-                        {product.category}
-                      </span>
-                    )}
-                    <div className="flex items-center justify-between mt-auto gap-2">
-                      <div>
-                        <span className="font-black text-slate-900 text-base leading-none">{price}</span>
-                        <span className="text-xs text-slate-400 font-bold mr-0.5">{CURRENCY}</span>
+                  <div className="p-4">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h2 className="line-clamp-2 text-base font-black">{product.name}</h2>
+                        {product.description && <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{product.description}</p>}
                       </div>
-                      {outOfStock ? (
-                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2.5 py-1.5 rounded-xl">نفد</span>
-                      ) : cartItem ? (
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => updateQty(product.id, -1)} className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors">
-                            <Minus className="w-3 h-3 text-slate-600" />
+                      <p className="shrink-0 text-left text-base font-black text-slate-950">{formatMoney(price, meta.currency)}</p>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${stock <= 0 ? "bg-red-50 text-red-600" : stock <= 3 ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+                        {stock <= 0 ? "نفد المخزون" : stock <= 3 ? `آخر ${stock}` : "متوفر"}
+                      </span>
+                      {item ? (
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => updateQty(product.id, -1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100">
+                            <Minus className="h-4 w-4" />
                           </button>
-                          <span className="font-black text-slate-900 text-sm w-6 text-center">{cartItem.quantity}</span>
-                          <button onClick={() => updateQty(product.id, 1)} className="w-8 h-8 rounded-xl flex items-center justify-center shadow-md shadow-amber-200"
-                            style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>
-                            <Plus className="w-3 h-3 text-white" />
+                          <span className="w-8 text-center text-sm font-black">{item.quantity}</span>
+                          <button onClick={() => updateQty(product.id, 1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white">
+                            <Plus className="h-4 w-4" />
                           </button>
                         </div>
                       ) : (
-                        <button onClick={() => addToCart(product)}
-                          className="w-9 h-9 rounded-2xl flex items-center justify-center active:scale-90 transition-all shadow-lg shadow-slate-900/20"
-                          style={{ background: "linear-gradient(135deg,#1e293b,#0f172a)" }}>
-                          <Plus className="w-4 h-4 text-white" />
+                        <button onClick={() => addToCart(product)} disabled={stock <= 0} className="flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-xs font-black text-white disabled:bg-slate-300">
+                          <Plus className="h-4 w-4" /> إضافة
                         </button>
                       )}
                     </div>
                   </div>
-                </motion.div>
+                </motion.article>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
 
       <AnimatePresence>
         {cart.length > 0 && (
-          <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
-            transition={{ type: "spring", damping: 22 }}
-            className="fixed bottom-0 left-0 right-0 px-4 pb-6 pt-2"
-            style={{ background: "linear-gradient(to top,rgba(241,245,249,1) 65%,transparent)" }}>
-            <button onClick={() => setStep(STEP_CART)}
-              className="w-full max-w-lg mx-auto py-4 rounded-3xl font-black text-base flex items-center justify-between px-5 active:scale-[0.97] transition-all shadow-2xl shadow-slate-900/25 block"
-              style={{ background: "linear-gradient(135deg,#0f172a,#1e293b)" }}>
-              <span className="bg-white/10 text-white/70 text-sm font-bold px-2.5 py-1 rounded-xl">{cartCount}</span>
-              <span className="flex items-center gap-2 text-white">
-                <ShoppingBag className="w-5 h-5" />
-                عرض السلة
-              </span>
-              <span className="font-black text-amber-400 text-base">{cartTotal} {CURRENCY}</span>
+          <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }} className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
+            <button onClick={() => setStep("cart")} className="mx-auto flex h-14 w-full max-w-2xl items-center justify-between rounded-lg bg-slate-950 px-4 text-white shadow-xl">
+              <span className="rounded-full bg-white/12 px-3 py-1 text-xs font-black">{cartCount}</span>
+              <span className="flex items-center gap-2 text-sm font-black"><ShoppingCart className="h-5 w-5" /> عرض الطلب</span>
+              <span className="text-sm font-black text-amber-300">{formatMoney(cartTotal, meta.currency)}</span>
             </button>
           </motion.div>
         )}
       </AnimatePresence>
+    </main>
+  );
+}
+
+function Field({ icon: Icon, placeholder, value, onChange, dir = "rtl" }) {
+  return (
+    <label className="relative block">
+      <Icon className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <input dir={dir} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="h-12 w-full rounded-lg border border-slate-200 bg-slate-50 py-3 pl-3 pr-10 text-sm outline-none transition focus:border-amber-500 focus:bg-white focus:ring-2 focus:ring-amber-100" />
+    </label>
+  );
+}
+
+function SummaryRow({ label, value, strong = false, tone }) {
+  return (
+    <div className={`flex items-center justify-between py-1 ${strong ? "text-lg font-black" : "text-sm font-bold"} ${tone === "success" ? "text-emerald-600" : "text-slate-700"}`}>
+      <span>{label}</span>
+      <span>{value}</span>
     </div>
   );
 }
