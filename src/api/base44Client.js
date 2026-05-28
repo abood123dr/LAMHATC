@@ -3,6 +3,11 @@
 
 import { supabase } from '@/lib/supabase-client';
 
+const isMissingTableError = (error) => {
+  const message = error?.message || '';
+  return message.includes('schema cache') || message.includes('Could not find the table') || (message.includes('relation') && message.includes('does not exist'));
+};
+
 // =============================================
 // Entity Class - نفس واجهة Base44
 // =============================================
@@ -21,7 +26,10 @@ class Entity {
     }
     if (limit) query = query.limit(limit);
     const { data, error } = await query;
-    if (error) { console.error(error); return []; }
+    if (error) {
+      if (!isMissingTableError(error)) console.error(error);
+      return [];
+    }
     return data || [];
   }
 
@@ -39,7 +47,10 @@ class Entity {
       query = query.order('created_at', { ascending: false });
     }
     const { data, error } = await query;
-    if (error) { console.error(error); return []; }
+    if (error) {
+      if (!isMissingTableError(error)) console.error(error);
+      return [];
+    }
     return data || [];
   }
 

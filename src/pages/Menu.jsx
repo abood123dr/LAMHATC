@@ -443,24 +443,32 @@ export default function Menu() {
     try {
       let customerId = null;
       const phone = form.phone.trim();
-      const existingCustomers = await db.entities.Customer.filter({ phone, branch });
-      if (existingCustomers?.length) {
-        customerId = existingCustomers[0].id;
-      } else {
-        const createdCustomer = await db.entities.Customer.create({
-          name: form.name.trim(),
-          phone,
-          city: form.city.trim(),
-          branch,
-          notes: "تم إنشاؤه تلقائيًا من الكتالوج العام",
-        });
-        customerId = createdCustomer.id;
+      try {
+        const existingCustomers = await db.entities.Customer.filter({ phone, branch });
+        if (existingCustomers?.length) {
+          customerId = existingCustomers[0].id;
+        } else {
+          const createdCustomer = await db.entities.Customer.create({
+            name: form.name.trim(),
+            phone,
+            city: form.city.trim(),
+            branch,
+            notes: "تم إنشاؤه تلقائيًا من الكتالوج العام",
+          });
+          customerId = createdCustomer.id;
+        }
+      } catch (error) {
+        console.warn("Customer auto-save failed; continuing with order details.", error);
       }
 
       if (appliedDiscount) {
-        await db.entities.DiscountCode.update(appliedDiscount.id, {
-          used_count: Number(appliedDiscount.used_count || 0) + 1,
-        });
+        try {
+          await db.entities.DiscountCode.update(appliedDiscount.id, {
+            used_count: Number(appliedDiscount.used_count || 0) + 1,
+          });
+        } catch (error) {
+          console.warn("Discount usage update failed; continuing with order.", error);
+        }
       }
 
       await db.entities.Order.create({

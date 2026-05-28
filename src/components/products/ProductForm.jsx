@@ -11,38 +11,31 @@ import { toast } from "sonner";
 
 const db = globalThis.__B44_DB__ || base44;
 
-export default function ProductForm({ open, onOpenChange, product, onSubmit }) {
-  const [form, setForm] = useState(
-    product || {
-      name: "",
-      code: "",
-      description: "",
-      image_url: "",
-      saudi_stock: 0,
-      turkey_stock: 0,
-      saudi_price: 0,
-      turkey_price: 0,
-      cost_price: 0,
-      category: "",
-    }
-  );
+const EMPTY_PRODUCT = {
+  name: "",
+  code: "",
+  description: "",
+  image_url: "",
+  saudi_stock: 0,
+  turkey_stock: 0,
+  saudi_price: 0,
+  turkey_price: 0,
+  cost_price: 0,
+  category: "",
+};
+
+const buildProductForm = (product) => ({ ...EMPTY_PRODUCT, ...(product || {}) });
+
+export default function ProductForm({ open, onOpenChange, product, onSubmit, categoryOptions = [] }) {
+  const [form, setForm] = useState(buildProductForm(product));
   const [uploading, setUploading] = useState(false);
+  const normalizedCategoryOptions = React.useMemo(
+    () => [...new Set(categoryOptions.map((category) => category?.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [categoryOptions]
+  );
 
   React.useEffect(() => {
-    setForm(
-      product || {
-        name: "",
-        code: "",
-        description: "",
-        image_url: "",
-        saudi_stock: 0,
-        turkey_stock: 0,
-        saudi_price: 0,
-        turkey_price: 0,
-        cost_price: 0,
-        category: "",
-      }
-    );
+    setForm(buildProductForm(product));
   }, [product, open]);
 
   const handleImage = async (e) => {
@@ -63,6 +56,7 @@ export default function ProductForm({ open, onOpenChange, product, onSubmit }) {
     e.preventDefault();
     onSubmit({
       ...form,
+      category: form.category.trim(),
       saudi_stock: Number(form.saudi_stock) || 0,
       turkey_stock: Number(form.turkey_stock) || 0,
       saudi_price: Number(form.saudi_price) || 0,
@@ -126,10 +120,34 @@ export default function ProductForm({ open, onOpenChange, product, onSubmit }) {
             <div>
               <Label>الفئة</Label>
               <Input
+                list="product-category-options"
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                placeholder="ستاندات"
+                placeholder="اختر أو اكتب قسم جديد"
               />
+              <datalist id="product-category-options">
+                {normalizedCategoryOptions.map((category) => (
+                  <option key={category} value={category} />
+                ))}
+              </datalist>
+              {normalizedCategoryOptions.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {normalizedCategoryOptions.slice(0, 8).map((category) => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setForm({ ...form, category })}
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+                        form.category === category
+                          ? "border-gold bg-gold/10 text-gold-dark"
+                          : "border-border bg-background text-muted-foreground hover:border-gold hover:text-gold"
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <Label>سعر التكلفة</Label>

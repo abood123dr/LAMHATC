@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import base44, { Product, Sale, Category } from "@/api/base44Client";
-import { Plus, Search, Package, FolderPlus, X, ImagePlus, Pencil } from "lucide-react";
+import { Plus, Search, Package, FolderPlus, ImagePlus, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/shared/PageHeader";
@@ -10,6 +10,13 @@ import ProductForm from "@/components/products/ProductForm";
 import ProductCard from "@/components/products/ProductCard";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+
+const emptyCategoryDraft = { name: "", description: "", image_url: "", sort_order: 0 };
+
+const isMissingCategoryTableError = (error) => {
+  const message = error?.message || "";
+  return message.includes("schema cache") || message.includes("Could not find the table") || (message.includes("relation") && message.includes("categories"));
+};
 
 export default function Products() {
   const qc = useQueryClient();
@@ -20,9 +27,10 @@ export default function Products() {
   const [activeCategory, setActiveCategory] = useState("all");
   const [newCategoryInput, setNewCategoryInput] = useState("");
   const [showAddCategory, setShowAddCategory] = useState(false);
-  const [categoryDraft, setCategoryDraft] = useState({ name: "", description: "", image_url: "", sort_order: 0 });
+  const [categoryDraft, setCategoryDraft] = useState(emptyCategoryDraft);
   const [editingCategory, setEditingCategory] = useState(null);
   const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false);
+  const [sessionCategories, setSessionCategories] = useState([]);
 
   const { data: products = [] } = useQuery({
     queryKey: ["products"],
@@ -68,28 +76,59 @@ export default function Products() {
   });
 
   const categoryMut = useMutation({
-    mutationFn: (data) => editingCategory?.id ? Category.update(editingCategory.id, data) : Category.create(data),
-    onSuccess: () => {
+    mutationFn: async (data) => {
+      if (editingCategory?.id) {
+        return { ...(await Category.update(editingCategory.id, data)), persisted: true };
+      }
+
+      try {
+        return { ...(await Category.create(data)), persisted: true };
+      } catch (error) {
+        if (!isMissingCategoryTableError(error)) throw error;
+        return { ...data, id: editingCategory?.id || null, sessionOnly: true };
+      }
+    },
+    onSuccess: (savedCategory) => {
       qc.invalidateQueries({ queryKey: ["categories"] });
+      setSessionCategories((items) => {
+        const next = items.filter((item) => item.name !== savedCategory.name && item.name !== editingCategory?.name);
+        return [...next, savedCategory];
+      });
+      setActiveCategory(savedCategory.name);
       setShowAddCategory(false);
       setEditingCategory(null);
       setNewCategoryInput("");
-      setCategoryDraft({ name: "", description: "", image_url: "", sort_order: 0 });
-      toast.success("تم حفظ القسم");
+      setCategoryDraft(emptyCategoryDraft);
+
+      if (savedCategory.sessionOnly) {
+        setEditing({ category: savedCategory.name });
+        setFormOpen(true);
+        toast.success("تم تجهيز القسم. أضف منتجًا له ليظهر مباشرة في الكتالوج.");
+      } else {
+        toast.success("تم حفظ القسم");
+      }
     },
     onError: (e) => toast.error("خطأ في حفظ القسم: " + e.message),
   });
 
   const handleSubmit = (data) => {
-    if (editing) updateMut.mutate({ id: editing.id, data });
+    if (editing?.id) updateMut.mutate({ id: editing.id, data });
     else createMut.mutate(data);
   };
 
-  const categories = useMemo(() => [...new Set(products.map((p) => p.category).filter(Boolean))].sort(), [products]);
+  const productCategoryNames = useMemo(() => [...new Set(products.map((p) => p.category?.trim()).filter(Boolean))].sort(), [products]);
+  const allCategoryNames = useMemo(
+    () => [...new Set([
+      ...productCategoryNames,
+      ...categoryRecords.map((category) => category.name?.trim()).filter(Boolean),
+      ...sessionCategories.map((category) => category.name?.trim()).filter(Boolean),
+    ])].sort((a, b) => a.localeCompare(b)),
+    [categoryRecords, productCategoryNames, sessionCategories]
+  );
 
   const categoryCards = useMemo(() => {
     const map = new Map();
-    categories.forEach((name) => {
+    productCategoryNames.forEach((name) => {
       const firstProduct = products.find((p) => p.category === name && p.image_url);
       map.set(name, {
         name,
@@ -100,6 +139,7 @@ export default function Products() {
       });
     });
     categoryRecords.forEach((cat) => {
+      if (cat.is_active === false) return;
       map.set(cat.name, {
         ...map.get(cat.name),
         ...cat,
@@ -107,8 +147,16 @@ export default function Products() {
         source: "categories",
       });
     });
+    sessionCategories.forEach((cat) => {
+      map.set(cat.name, {
+        ...map.get(cat.name),
+        ...cat,
+        count: products.filter((p) => p.category === cat.name).length,
+        source: cat.sessionOnly ? "session" : cat.source || "categories",
+      });
+    });
     return Array.from(map.values()).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
-  }, [categories, categoryRecords, products]);
+  }, [categoryRecords, productCategoryNames, products, sessionCategories]);
 
   const handleAddCategory = () => {
     const name = (categoryDraft.name || newCategoryInput).trim();
@@ -119,16 +167,18 @@ export default function Products() {
       sort_order: Number(categoryDraft.sort_order) || categoryCards.length + 1,
       is_active: true,
     });
-    setActiveCategory(name);
-    return;
-    const cat = newCategoryInput.trim();
-    if (!cat) return;
-    setActiveCategory(cat);
-    setNewCategoryInput("");
+  };
+
+  const resetCategoryEditor = () => {
     setShowAddCategory(false);
-    setEditing({ category: cat });
+    setEditingCategory(null);
+    setNewCategoryInput("");
+    setCategoryDraft(emptyCategoryDraft);
+  };
+
+  const openProductForm = (category = "") => {
+    setEditing(category ? { category } : null);
     setFormOpen(true);
-    toast.success(`تم إنشاء مجموعة "${cat}" — أضف منتجاً لها`);
   };
 
   const editCategory = (cat) => {
@@ -161,13 +211,14 @@ export default function Products() {
     const matchCategory = activeCategory === "all" || p.category === activeCategory;
     return matchSearch && matchCategory;
   });
+  const selectedCategory = activeCategory === "all" ? null : categoryCards.find((cat) => cat.name === activeCategory);
 
   return (
     <div>
       <PageHeader
         title="المنتجات والمخزون"
         subtitle="إدارة مستقلة لمخزون وأسعار كل فرع"
-        action={<Button onClick={() => { setEditing(null); setFormOpen(true); }} className="bg-gold hover:bg-gold-dark text-white gap-2"><Plus className="w-4 h-4" /> منتج جديد</Button>}
+        action={<Button onClick={() => openProductForm()} className="bg-gold hover:bg-gold-dark text-white gap-2"><Plus className="w-4 h-4" /> منتج جديد</Button>}
       />
       <div className="mb-4 relative max-w-md">
         <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -179,7 +230,7 @@ export default function Products() {
             <h2 className="font-black text-foreground">إدارة أقسام المنيو</h2>
             <p className="text-sm text-muted-foreground">أنشئ أقسام مصورة تظهر للعميل في صفحة الطلب.</p>
           </div>
-          <Button onClick={() => { setShowAddCategory(true); setEditingCategory(null); setCategoryDraft({ name: "", description: "", image_url: "", sort_order: categoryCards.length + 1 }); }} className="bg-gold hover:bg-gold-dark text-white gap-2">
+          <Button onClick={() => { setShowAddCategory(true); setEditingCategory(null); setCategoryDraft({ ...emptyCategoryDraft, sort_order: categoryCards.length + 1 }); }} className="bg-gold hover:bg-gold-dark text-white gap-2">
             <FolderPlus className="w-4 h-4" /> قسم جديد
           </Button>
         </div>
@@ -205,7 +256,7 @@ export default function Products() {
               <Button onClick={handleAddCategory} disabled={categoryMut.isPending} className="bg-gold hover:bg-gold-dark text-white">
                 {editingCategory ? "حفظ" : "إضافة"}
               </Button>
-              <Button type="button" variant="outline" onClick={() => { setShowAddCategory(false); setEditingCategory(null); setNewCategoryInput(""); setCategoryDraft({ name: "", description: "", image_url: "", sort_order: 0 }); }}>
+              <Button type="button" variant="outline" onClick={resetCategoryEditor}>
                 إلغاء
               </Button>
             </div>
@@ -226,6 +277,9 @@ export default function Products() {
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{cat.description || `${cat.count} منتج`}</p>
+                {cat.count === 0 && (
+                  <span className="mt-2 inline-flex text-xs font-bold text-gold">أضف منتجًا لهذا القسم</span>
+                )}
               </div>
             </button>
           ))}
@@ -236,31 +290,25 @@ export default function Products() {
         <button onClick={() => setActiveCategory("all")} className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${activeCategory === "all" ? "bg-foreground text-background border-foreground shadow-sm" : "bg-card text-muted-foreground border-border hover:border-foreground/30"}`}>
           ✦ الكل <span className="mr-1 text-xs opacity-70">({products.length})</span>
         </button>
-        {categories.map((cat) => (
+        {allCategoryNames.map((cat) => (
           <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${activeCategory === cat ? "bg-foreground text-background border-foreground shadow-sm" : "bg-card text-muted-foreground border-border hover:border-foreground/30"}`}>
             {cat} <span className="mr-1 text-xs opacity-70">({products.filter((p) => p.category === cat).length})</span>
           </button>
         ))}
-        {false && showAddCategory ? (
-          <div className="flex items-center gap-2">
-            <input autoFocus value={newCategoryInput} onChange={(e) => setNewCategoryInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleAddCategory(); if (e.key === "Escape") setShowAddCategory(false); }} placeholder="اسم المجموعة..." className="px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring w-40" />
-            <Button size="sm" onClick={handleAddCategory} className="bg-gold hover:bg-gold-dark text-white">إضافة</Button>
-            <button onClick={() => { setShowAddCategory(false); setNewCategoryInput(""); }} className="p-1.5 rounded-lg hover:bg-accent"><X className="w-4 h-4 text-muted-foreground" /></button>
-          </div>
-        ) : (
-          <button onClick={() => setShowAddCategory(true)} className="hidden items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-dashed border-border text-muted-foreground hover:border-gold hover:text-gold transition-all">
-            <FolderPlus className="w-4 h-4" />مجموعة جديدة
-          </button>
-        )}
       </div>
       {filtered.length === 0 ? (
-        <EmptyState icon={Package} title={search ? "لا توجد نتائج" : "لا توجد منتجات بعد"} description="ابدأ بإضافة أول منتج لإدارة المخزون في كلا الفرعين" action={!search && <Button onClick={() => { setEditing(null); setFormOpen(true); }} className="bg-gold hover:bg-gold-dark text-white gap-2"><Plus className="w-4 h-4" /> إضافة منتج</Button>} />
+        <EmptyState
+          icon={Package}
+          title={search ? "لا توجد نتائج" : selectedCategory ? `لا توجد منتجات في ${selectedCategory.name}` : "لا توجد منتجات بعد"}
+          description={selectedCategory ? "أضف أول منتج لهذا القسم وسيظهر مباشرة في الكتالوج العام." : "ابدأ بإضافة أول منتج لإدارة المخزون في كلا الفرعين"}
+          action={<Button onClick={() => openProductForm(selectedCategory?.name || "")} className="bg-gold hover:bg-gold-dark text-white gap-2"><Plus className="w-4 h-4" /> إضافة منتج</Button>}
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {filtered.map((p) => <ProductCard key={p.id} product={p} onEdit={(x) => { setEditing(x); setFormOpen(true); }} onDelete={setDeleting} salesByProduct={salesByProduct} />)}
         </div>
       )}
-      <ProductForm open={formOpen} onOpenChange={(v) => { setFormOpen(v); if (!v) setEditing(null); }} product={editing} onSubmit={handleSubmit} />
+      <ProductForm open={formOpen} onOpenChange={(v) => { setFormOpen(v); if (!v) setEditing(null); }} product={editing} onSubmit={handleSubmit} categoryOptions={allCategoryNames} />
       <AlertDialog open={!!deleting} onOpenChange={(v) => !v && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>حذف المنتج؟</AlertDialogTitle><AlertDialogDescription>سيتم حذف "{deleting?.name}" نهائيًا.</AlertDialogDescription></AlertDialogHeader>
