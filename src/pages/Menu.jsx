@@ -68,7 +68,8 @@ const BANK_INFO = {
   currency: "TL",
 };
 
-const CATALOG_TIMEOUT_MS = 9000;
+const PRODUCT_TIMEOUT_MS = 4500;
+const CATEGORY_TIMEOUT_MS = 2200;
 
 const getInitialBranch = () => {
   const branch = new URLSearchParams(window.location.search).get("branch");
@@ -79,7 +80,7 @@ const formatMoney = (value, currency) => `${Number(value || 0).toLocaleString("a
 
 const getProductCategory = (product) => product.category?.trim() || "";
 
-const withTimeout = (promise, timeoutMs = CATALOG_TIMEOUT_MS) =>
+const withTimeout = (promise, timeoutMs = PRODUCT_TIMEOUT_MS) =>
   Promise.race([
     promise,
     new Promise((_, reject) => {
@@ -150,21 +151,32 @@ export default function Menu() {
 
     const slowTimer = window.setTimeout(() => {
       if (!silent && loadRequestRef.current === requestId) setSlowLoading(true);
-    }, 1600);
+    }, 900);
 
     try {
-      const [productData, categoryData] = await withTimeout(Promise.all([
-        db.entities.Product.list("-created_at", 500),
-        db.entities.Category?.list ? db.entities.Category.list("sort_order", 500) : Promise.resolve([]),
-      ]));
+      const productData = await withTimeout(db.entities.Product.list("-created_at", 500), PRODUCT_TIMEOUT_MS);
       if (loadRequestRef.current !== requestId) return;
+      window.clearTimeout(slowTimer);
+      setSlowLoading(false);
       setProducts(productData || []);
-      setCategoryRecords(categoryData || []);
+      if (!silent) setLoading(false);
+
+      try {
+        const categoryData = db.entities.Category?.list
+          ? await withTimeout(db.entities.Category.list("sort_order", 500), CATEGORY_TIMEOUT_MS)
+          : [];
+        if (loadRequestRef.current !== requestId) return;
+        setCategoryRecords(categoryData || []);
+      } catch {
+        // Keep products visible even if category metadata is unavailable.
+      }
     } catch (error) {
       if (loadRequestRef.current !== requestId) return;
-      setProducts([]);
-      setCategoryRecords([]);
-      setLoadError(error.message === "timeout" ? "استغرق تحميل الكتالوج وقتًا أطول من المتوقع." : "تعذر تحميل الكتالوج الآن.");
+      if (!silent) {
+        setProducts([]);
+        setCategoryRecords([]);
+        setLoadError(error.message === "timeout" ? "استغرق تحميل الكتالوج وقتًا أطول من المتوقع." : "تعذر تحميل الكتالوج الآن.");
+      }
     } finally {
       window.clearTimeout(slowTimer);
       if (loadRequestRef.current === requestId) {
