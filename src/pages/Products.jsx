@@ -18,6 +18,18 @@ const isMissingCategoryTableError = (error) => {
   return message.includes("schema cache") || message.includes("Could not find the table") || (message.includes("relation") && message.includes("categories"));
 };
 
+const broadcastCatalogRefresh = () => {
+  const stamp = Date.now().toString();
+  try {
+    window.localStorage.setItem("lamhatc_catalog_refresh", stamp);
+  } catch (error) {
+    // Local storage can be unavailable in private browsing; the page still updates on navigation.
+  }
+  window.dispatchEvent(new CustomEvent("lamhatc:catalog-refresh", { detail: stamp }));
+};
+
+const getProductCategory = (product) => product.category?.trim() || "";
+
 export default function Products() {
   const qc = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
@@ -59,19 +71,19 @@ export default function Products() {
 
   const createMut = useMutation({
     mutationFn: (data) => Product.create(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["products"] }); setFormOpen(false); toast.success("تمت إضافة المنتج"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["products"] }); broadcastCatalogRefresh(); setFormOpen(false); toast.success("تمت إضافة المنتج وسيظهر في الكتالوج"); },
     onError: (e) => toast.error("خطأ: " + e.message),
   });
 
   const updateMut = useMutation({
     mutationFn: ({ id, data }) => Product.update(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["products"] }); setFormOpen(false); setEditing(null); toast.success("تم حفظ التعديلات"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["products"] }); broadcastCatalogRefresh(); setFormOpen(false); setEditing(null); toast.success("تم حفظ التعديلات وتحديث الكتالوج"); },
     onError: (e) => toast.error("خطأ: " + e.message),
   });
 
   const deleteMut = useMutation({
     mutationFn: (id) => Product.delete(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["products"] }); setDeleting(null); toast.success("تم حذف المنتج"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["products"] }); broadcastCatalogRefresh(); setDeleting(null); toast.success("تم حذف المنتج وتحديث الكتالوج"); },
     onError: (e) => toast.error("خطأ: " + e.message),
   });
 
@@ -116,7 +128,7 @@ export default function Products() {
     else createMut.mutate(data);
   };
 
-  const productCategoryNames = useMemo(() => [...new Set(products.map((p) => p.category?.trim()).filter(Boolean))].sort(), [products]);
+  const productCategoryNames = useMemo(() => [...new Set(products.map(getProductCategory).filter(Boolean))].sort(), [products]);
   const allCategoryNames = useMemo(
     () => [...new Set([
       ...productCategoryNames,
@@ -129,12 +141,13 @@ export default function Products() {
   const categoryCards = useMemo(() => {
     const map = new Map();
     productCategoryNames.forEach((name) => {
-      const firstProduct = products.find((p) => p.category === name && p.image_url);
+      const categoryProducts = products.filter((p) => getProductCategory(p) === name);
+      const firstProduct = categoryProducts.find((p) => p.image_url);
       map.set(name, {
         name,
         description: "",
         image_url: firstProduct?.image_url || "",
-        count: products.filter((p) => p.category === name).length,
+        count: categoryProducts.length,
         source: "products",
       });
     });
@@ -143,7 +156,7 @@ export default function Products() {
       map.set(cat.name, {
         ...map.get(cat.name),
         ...cat,
-        count: products.filter((p) => p.category === cat.name).length,
+        count: products.filter((p) => getProductCategory(p) === cat.name).length,
         source: "categories",
       });
     });
@@ -151,7 +164,7 @@ export default function Products() {
       map.set(cat.name, {
         ...map.get(cat.name),
         ...cat,
-        count: products.filter((p) => p.category === cat.name).length,
+        count: products.filter((p) => getProductCategory(p) === cat.name).length,
         source: cat.sessionOnly ? "session" : cat.source || "categories",
       });
     });
@@ -207,8 +220,9 @@ export default function Products() {
   };
 
   const filtered = products.filter((p) => {
-    const matchSearch = !search || p.name?.toLowerCase().includes(search.toLowerCase()) || p.code?.toLowerCase().includes(search.toLowerCase()) || p.category?.toLowerCase().includes(search.toLowerCase());
-    const matchCategory = activeCategory === "all" || p.category === activeCategory;
+    const category = getProductCategory(p);
+    const matchSearch = !search || p.name?.toLowerCase().includes(search.toLowerCase()) || p.code?.toLowerCase().includes(search.toLowerCase()) || category.toLowerCase().includes(search.toLowerCase());
+    const matchCategory = activeCategory === "all" || category === activeCategory;
     return matchSearch && matchCategory;
   });
   const selectedCategory = activeCategory === "all" ? null : categoryCards.find((cat) => cat.name === activeCategory);
@@ -292,7 +306,7 @@ export default function Products() {
         </button>
         {allCategoryNames.map((cat) => (
           <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${activeCategory === cat ? "bg-foreground text-background border-foreground shadow-sm" : "bg-card text-muted-foreground border-border hover:border-foreground/30"}`}>
-            {cat} <span className="mr-1 text-xs opacity-70">({products.filter((p) => p.category === cat).length})</span>
+            {cat} <span className="mr-1 text-xs opacity-70">({products.filter((p) => getProductCategory(p) === cat).length})</span>
           </button>
         ))}
       </div>

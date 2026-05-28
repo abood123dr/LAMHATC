@@ -105,6 +105,7 @@ const getInitialBranch = () => {
 const formatMoney = (value, currency) => `${Number(value || 0).toLocaleString("ar-SA")} ${currency}`;
 
 const normalizeText = (value = "") => value.toString().trim().toLowerCase();
+const getProductCategory = (product) => product.category?.trim() || "";
 
 const getCategoryFallbackImage = (categoryName = "") => {
   const normalized = normalizeText(categoryName);
@@ -174,15 +175,15 @@ export default function Menu() {
     window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
   }, [branch]);
 
-  const loadCatalog = useCallback(async () => {
+  const loadCatalog = useCallback(async ({ silent = false } = {}) => {
     const requestId = loadRequestRef.current + 1;
     loadRequestRef.current = requestId;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setSlowLoading(false);
     setLoadError("");
 
     const slowTimer = window.setTimeout(() => {
-      if (loadRequestRef.current === requestId) setSlowLoading(true);
+      if (!silent && loadRequestRef.current === requestId) setSlowLoading(true);
     }, 1600);
 
     try {
@@ -202,7 +203,7 @@ export default function Menu() {
       window.clearTimeout(slowTimer);
       if (loadRequestRef.current === requestId) {
         setSlowLoading(false);
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     }
   }, []);
@@ -227,18 +228,43 @@ export default function Menu() {
     };
   }, [loadCatalog]);
 
+  useEffect(() => {
+    const refresh = () => loadCatalog({ silent: true });
+    const refreshOnFocus = () => {
+      if (!document.hidden) loadCatalog({ silent: true });
+    };
+    const refreshOnStorage = (event) => {
+      if (event.key === "lamhatc_catalog_refresh") loadCatalog({ silent: true });
+    };
+    const refreshTimer = window.setInterval(refresh, 30000);
+
+    window.addEventListener("focus", refreshOnFocus);
+    window.addEventListener("storage", refreshOnStorage);
+    window.addEventListener("lamhatc:catalog-refresh", refresh);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+
+    return () => {
+      window.clearInterval(refreshTimer);
+      window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("storage", refreshOnStorage);
+      window.removeEventListener("lamhatc:catalog-refresh", refresh);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
+  }, [loadCatalog]);
+
   const categories = useMemo(() => {
-    const names = [...new Set(products.map((product) => product.category).filter(Boolean))];
+    const names = [...new Set(products.map(getProductCategory).filter(Boolean))];
     const map = new Map();
 
     names.forEach((name) => {
-      const firstProductImage = products.find((product) => product.category === name && product.image_url)?.image_url;
+      const categoryProducts = products.filter((product) => getProductCategory(product) === name);
+      const firstProductImage = categoryProducts.find((product) => product.image_url)?.image_url;
       map.set(name, {
         name,
         image_url: firstProductImage || "",
         description: "",
         sort_order: 999,
-        count: products.filter((product) => product.category === name).length,
+        count: categoryProducts.length,
       });
     });
 
@@ -247,7 +273,7 @@ export default function Menu() {
       map.set(category.name, {
         ...map.get(category.name),
         ...category,
-        count: products.filter((product) => product.category === category.name).length,
+        count: products.filter((product) => getProductCategory(product) === category.name).length,
       });
     });
 
@@ -263,16 +289,17 @@ export default function Menu() {
   }, [categories]);
 
   const getProductDisplayImage = useCallback(
-    (product) => product.image_url || categoryImageByName.get(product.category) || getCategoryFallbackImage(product.category),
+    (product) => product.image_url || categoryImageByName.get(getProductCategory(product)) || getCategoryFallbackImage(getProductCategory(product)),
     [categoryImageByName]
   );
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     return products.filter((product) => {
-      if (activeCategory !== "all" && product.category !== activeCategory) return false;
+      const category = getProductCategory(product);
+      if (activeCategory !== "all" && category !== activeCategory) return false;
       if (!normalizedSearch) return true;
-      return [product.name, product.description, product.code, product.category]
+      return [product.name, product.description, product.code, category]
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(normalizedSearch));
     });
@@ -942,7 +969,7 @@ function ProductTile({ product, index, meta, item, image, onAdd, onQty }) {
         <img src={image} alt={product.name || ""} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" />
         <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-950/65 to-transparent" />
         {stock <= 0 && <div className="absolute inset-0 flex items-center justify-center bg-slate-950/55 text-sm font-black text-white">غير متوفر</div>}
-        {product.category && <span className="absolute right-3 top-3 max-w-[80%] truncate rounded-full bg-white/92 px-3 py-1 text-xs font-black text-slate-700 shadow-sm">{product.category}</span>}
+        {getProductCategory(product) && <span className="absolute right-3 top-3 max-w-[80%] truncate rounded-full bg-white/92 px-3 py-1 text-xs font-black text-slate-700 shadow-sm">{getProductCategory(product)}</span>}
         <span className="absolute bottom-3 right-3 rounded-lg bg-white px-3 py-1.5 text-sm font-black text-slate-950 shadow-sm">
           {formatMoney(price, meta.currency)}
         </span>
