@@ -77,3 +77,13 @@ const createMissingConfigClient = () => ({
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseKey)
   : createMissingConfigClient();
+
+export const publicSupabase = isSupabaseConfigured
+  ? createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
+    })
+  : createMissingConfigClient();

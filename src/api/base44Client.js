@@ -1,7 +1,7 @@
 // src/api/base44Client.js
 // استبدال كامل لـ Base44 SDK بـ Supabase
 
-import { supabase } from '@/lib/supabase-client';
+import { publicSupabase, supabase } from '@/lib/supabase-client';
 
 const isMissingTableError = (error) => {
   const message = error?.message || '';
@@ -66,21 +66,38 @@ class Entity {
     return data;
   }
 
-  async create(record) {
-    const { data: { user } } = await supabase.auth.getUser();
-    const payload = { ...record, created_by: user?.email || null };
-    let { data, error } = await supabase
-      .from(this.tableName)
-      .insert([payload])
-      .select().single();
-    if (error && isMissingColumnError(error, 'created_by')) {
-      ({ data, error } = await supabase
-        .from(this.tableName)
-        .insert([record])
-        .select().single());
+  async create(record, options = {}) {
+    const { client = supabase, includeCreatedBy = true, returning = true } = options;
+    let payload = record;
+
+    if (includeCreatedBy) {
+      const { data: { user } } = await client.auth.getUser();
+      payload = { ...record, created_by: user?.email || null };
+    }
+
+    const insertRecord = async (candidate) => {
+      const query = client.from(this.tableName).insert([candidate]);
+      if (!returning) {
+        const { error } = await query;
+        return { data: candidate, error };
+      }
+      return query.select().single();
+    };
+
+    let { data, error } = await insertRecord(payload);
+    if (error && includeCreatedBy && isMissingColumnError(error, 'created_by')) {
+      ({ data, error } = await insertRecord(record));
     }
     if (error) throw error;
     return data;
+  }
+
+  async createPublic(record) {
+    return this.create(record, {
+      client: publicSupabase,
+      includeCreatedBy: false,
+      returning: false,
+    });
   }
 
   async update(id, updates) {

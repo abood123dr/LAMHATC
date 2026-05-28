@@ -101,7 +101,7 @@ export default function Orders() {
 
   const { data: orders = [] } = useQuery({
     queryKey: ["orders"],
-    queryFn: () => db.entities.Order.list("-created_date", 500),
+    queryFn: () => db.entities.Order.list("-created_at", 500),
     refetchInterval: 15000,
   });
 
@@ -329,7 +329,7 @@ export default function Orders() {
                         <StatusDropdown order={order} onUpdate={(id, status) => updateMut.mutate({ id, status })} />
                       </td>
                       <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
-                        {order.created_date && format(new Date(order.created_date), "d MMM، HH:mm", { locale: ar })}
+                        {(order.created_at || order.created_date) && format(new Date(order.created_at || order.created_date), "d MMM، HH:mm", { locale: ar })}
                       </td>
                     </tr>
                   );

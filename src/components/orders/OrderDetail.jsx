@@ -39,7 +39,7 @@ async function completeSaleAutomatically(order) {
     // جلب جميع المنتجات والبحث بالـ id يدوياً (filter لا يدعم البحث بالـ id)
     let product = null;
     if (item.product_id) {
-      const allProducts = await db.entities.Product.list("-created_date", 500);
+      const allProducts = await db.entities.Product.list("-created_at", 500);
       product = allProducts.find((p) => p.id === item.product_id) || null;
     }
 
@@ -204,10 +204,10 @@ export default function OrderDetail({ order, open, onOpenChange, onStatusChange 
           )}
 
           {/* Date */}
-          {order.created_date && (
+          {(order.created_at || order.created_date) && (
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <Calendar className="w-3.5 h-3.5" />
-              {format(new Date(order.created_date), "EEEE d MMMM yyyy، HH:mm", { locale: ar })}
+              {format(new Date(order.created_at || order.created_date), "EEEE d MMMM yyyy، HH:mm", { locale: ar })}
             </div>
           )}
 

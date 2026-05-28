@@ -134,6 +134,53 @@ begin
       to anon
       with check (true);
     end if;
+
+    if not exists (
+      select 1 from pg_policies
+      where schemaname = 'public'
+        and tablename = 'orders'
+        and policyname = 'Authenticated users can create orders'
+    ) then
+      create policy "Authenticated users can create orders"
+      on public.orders
+      for insert
+      to authenticated
+      with check (true);
+    end if;
+
+    if not exists (
+      select 1 from pg_policies
+      where schemaname = 'public'
+        and tablename = 'orders'
+        and policyname = 'Authenticated users can read orders'
+    ) then
+      create policy "Authenticated users can read orders"
+      on public.orders
+      for select
+      to authenticated
+      using (true);
+    end if;
+
+    if not exists (
+      select 1 from pg_policies
+      where schemaname = 'public'
+        and tablename = 'orders'
+        and policyname = 'Authenticated users can update orders'
+    ) then
+      create policy "Authenticated users can update orders"
+      on public.orders
+      for update
+      to authenticated
+      using (true)
+      with check (true);
+    end if;
+
+    begin
+      alter publication supabase_realtime add table public.orders;
+    exception
+      when duplicate_object then null;
+      when undefined_object then null;
+    end;
   end if;
 
   if to_regclass('public.customers') is not null then
@@ -149,6 +196,33 @@ begin
       on public.customers
       for insert
       to anon
+      with check (true);
+    end if;
+
+    if not exists (
+      select 1 from pg_policies
+      where schemaname = 'public'
+        and tablename = 'customers'
+        and policyname = 'Authenticated users can read customers'
+    ) then
+      create policy "Authenticated users can read customers"
+      on public.customers
+      for select
+      to authenticated
+      using (true);
+    end if;
+
+    if not exists (
+      select 1 from pg_policies
+      where schemaname = 'public'
+        and tablename = 'customers'
+        and policyname = 'Authenticated users can update customers'
+    ) then
+      create policy "Authenticated users can update customers"
+      on public.customers
+      for update
+      to authenticated
+      using (true)
       with check (true);
     end if;
   end if;

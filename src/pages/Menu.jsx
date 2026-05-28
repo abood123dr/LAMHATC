@@ -70,6 +70,8 @@ const BANK_INFO = {
 
 const PRODUCT_TIMEOUT_MS = 4500;
 const CATEGORY_TIMEOUT_MS = 2200;
+const ORDER_SAVE_TIMEOUT_MS = 5500;
+const CUSTOMER_SAVE_TIMEOUT_MS = 3500;
 
 const getInitialBranch = () => {
   const branch = new URLSearchParams(window.location.search).get("branch");
@@ -87,6 +89,9 @@ const withTimeout = (promise, timeoutMs = PRODUCT_TIMEOUT_MS) =>
       window.setTimeout(() => reject(new Error("timeout")), timeoutMs);
     }),
   ]);
+
+const createPublicRecord = (entity, payload) =>
+  entity.createPublic ? entity.createPublic(payload) : entity.create(payload);
 
 function playTapSound() {
   try {
@@ -437,25 +442,33 @@ export default function Menu() {
 
     setSubmitting(true);
     try {
-      let customerId = null;
       const phone = form.phone.trim();
-      try {
-        const existingCustomers = await db.entities.Customer.filter({ phone, branch });
+
+      const customerSavePromise = (async () => {
+        const existingCustomers = await withTimeout(
+          db.entities.Customer.filter({ phone, branch }),
+          CUSTOMER_SAVE_TIMEOUT_MS
+        );
         if (existingCustomers?.length) {
-          customerId = existingCustomers[0].id;
-        } else {
-          const createdCustomer = await db.entities.Customer.create({
+          return existingCustomers[0].id;
+        }
+
+        const createdCustomer = await withTimeout(
+          createPublicRecord(db.entities.Customer, {
             name: form.name.trim(),
             phone,
             city: form.city.trim(),
             branch,
             notes: "تم إنشاؤه تلقائيًا من الكتالوج العام",
-          });
-          customerId = createdCustomer.id;
-        }
-      } catch (error) {
+          }),
+          CUSTOMER_SAVE_TIMEOUT_MS
+        );
+        return createdCustomer?.id || null;
+      })();
+
+      customerSavePromise.catch((error) => {
         console.warn("Customer auto-save failed; continuing with order details.", error);
-      }
+      });
 
       const orderPayload = {
         customer_name: form.name.trim(),
@@ -478,8 +491,18 @@ export default function Menu() {
           locationUrl ? `موقع العميل: ${locationUrl}` : "",
           form.notes.trim(),
         ].filter(Boolean).join("\n"),
-        customer_id: customerId,
+        customer_id: null,
       };
+
+      try {
+        const customerId = await Promise.race([
+          customerSavePromise,
+          new Promise((resolve) => window.setTimeout(() => resolve(null), 700)),
+        ]);
+        if (customerId) orderPayload.customer_id = customerId;
+      } catch (error) {
+        console.warn("Customer auto-save did not finish before order save.", error);
+      }
 
       const itemsText = cart.map((item) => `• ${item.product_name} × ${item.quantity} = ${formatMoney(item.total, meta.currency)}`).join("\n");
       const whatsappText = [
@@ -504,7 +527,10 @@ export default function Menu() {
 
       let orderSaved = false;
       try {
-        await db.entities.Order.create(orderPayload);
+        await withTimeout(
+          createPublicRecord(db.entities.Order, orderPayload),
+          ORDER_SAVE_TIMEOUT_MS
+        );
         orderSaved = true;
       } catch (error) {
         console.warn("Order database save failed; continuing with WhatsApp handoff.", error);
@@ -520,13 +546,12 @@ export default function Menu() {
       }
 
       if (appliedDiscount && orderSaved) {
-        try {
-          await db.entities.DiscountCode.update(appliedDiscount.id, {
-            used_count: Number(appliedDiscount.used_count || 0) + 1,
+        db.entities.DiscountCode.update(appliedDiscount.id, {
+          used_count: Number(appliedDiscount.used_count || 0) + 1,
+        })
+          .catch((error) => {
+            console.warn("Discount usage update failed; continuing with order.", error);
           });
-        } catch (error) {
-          console.warn("Discount usage update failed; continuing with order.", error);
-        }
       }
 
       setOrderSaveStatus(orderSaved ? "saved" : "whatsapp");
