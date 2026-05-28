@@ -70,33 +70,6 @@ const BANK_INFO = {
 
 const CATALOG_TIMEOUT_MS = 9000;
 
-const CATEGORY_IMAGE_FALLBACKS = [
-  {
-    match: ["ورد", "زهور", "flower", "rose"],
-    url: "https://images.unsplash.com/photo-1490750967868-88aa4486c946?auto=format&fit=crop&w=900&q=80",
-  },
-  {
-    match: ["هدية", "هدايا", "gift"],
-    url: "https://images.unsplash.com/photo-1513201099705-a9746e1e201f?auto=format&fit=crop&w=900&q=80",
-  },
-  {
-    match: ["ديكور", "decor", "ستاند", "stand"],
-    url: "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?auto=format&fit=crop&w=900&q=80",
-  },
-  {
-    match: ["عطر", "تجميل", "beauty", "perfume"],
-    url: "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=900&q=80",
-  },
-  {
-    match: ["قهوة", "شاي", "coffee"],
-    url: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=900&q=80",
-  },
-  {
-    match: [],
-    url: "https://images.unsplash.com/photo-1512436991641-6745cdb1723f?auto=format&fit=crop&w=900&q=80",
-  },
-];
-
 const getInitialBranch = () => {
   const branch = new URLSearchParams(window.location.search).get("branch");
   return branch === "turkey" ? "turkey" : "saudi";
@@ -104,16 +77,7 @@ const getInitialBranch = () => {
 
 const formatMoney = (value, currency) => `${Number(value || 0).toLocaleString("ar-SA")} ${currency}`;
 
-const normalizeText = (value = "") => value.toString().trim().toLowerCase();
 const getProductCategory = (product) => product.category?.trim() || "";
-
-const getCategoryFallbackImage = (categoryName = "") => {
-  const normalized = normalizeText(categoryName);
-  return (
-    CATEGORY_IMAGE_FALLBACKS.find((item) => item.match.some((word) => normalized.includes(word))) ||
-    CATEGORY_IMAGE_FALLBACKS[CATEGORY_IMAGE_FALLBACKS.length - 1]
-  ).url;
-};
 
 const withTimeout = (promise, timeoutMs = CATALOG_TIMEOUT_MS) =>
   Promise.race([
@@ -166,6 +130,8 @@ export default function Menu() {
   const [appliedDiscount, setAppliedDiscount] = useState(null);
   const [checkingCode, setCheckingCode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [orderSaveStatus, setOrderSaveStatus] = useState("saved");
+  const [whatsappLink, setWhatsappLink] = useState("");
   const fileInputRef = useRef(null);
   const loadRequestRef = useRef(0);
 
@@ -283,13 +249,13 @@ export default function Menu() {
   const categoryImageByName = useMemo(() => {
     const map = new Map();
     categories.forEach((category) => {
-      map.set(category.name, category.image_url || getCategoryFallbackImage(category.name));
+      map.set(category.name, category.image_url || "");
     });
     return map;
   }, [categories]);
 
   const getProductDisplayImage = useCallback(
-    (product) => product.image_url || categoryImageByName.get(getProductCategory(product)) || getCategoryFallbackImage(getProductCategory(product)),
+    (product) => product.image_url || categoryImageByName.get(getProductCategory(product)) || "",
     [categoryImageByName]
   );
 
@@ -309,15 +275,6 @@ export default function Menu() {
     () => products.filter((product) => Number(product[meta.stockKey] || 0) > 0).length,
     [meta.stockKey, products]
   );
-
-  const heroImages = useMemo(() => {
-    const productImages = products
-      .filter((product) => product.image_url)
-      .slice(0, 4)
-      .map((product) => product.image_url);
-    const categoryImages = categories.slice(0, 4).map((category) => category.image_url || getCategoryFallbackImage(category.name));
-    return [...productImages, ...categoryImages, ...CATEGORY_IMAGE_FALLBACKS.map((item) => item.url)].slice(0, 4);
-  }, [categories, products]);
 
   const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0);
   const discountAmount = appliedDiscount
@@ -488,17 +445,7 @@ export default function Menu() {
         console.warn("Customer auto-save failed; continuing with order details.", error);
       }
 
-      if (appliedDiscount) {
-        try {
-          await db.entities.DiscountCode.update(appliedDiscount.id, {
-            used_count: Number(appliedDiscount.used_count || 0) + 1,
-          });
-        } catch (error) {
-          console.warn("Discount usage update failed; continuing with order.", error);
-        }
-      }
-
-      await db.entities.Order.create({
+      const orderPayload = {
         customer_name: form.name.trim(),
         customer_phone: phone,
         customer_city: form.city.trim(),
@@ -520,8 +467,7 @@ export default function Menu() {
           form.notes.trim(),
         ].filter(Boolean).join("\n"),
         customer_id: customerId,
-        customer_location_url: locationUrl || null,
-      });
+      };
 
       const itemsText = cart.map((item) => `• ${item.product_name} × ${item.quantity} = ${formatMoney(item.total, meta.currency)}`).join("\n");
       const whatsappText = [
@@ -544,10 +490,45 @@ export default function Menu() {
         form.notes.trim() ? `ملاحظات: ${form.notes.trim()}` : "",
       ].filter(Boolean).join("\n");
 
-      window.open(`https://wa.me/${STORE_WHATSAPP[branch]}?text=${encodeURIComponent(whatsappText)}`, "_blank");
+      let orderSaved = false;
+      try {
+        await db.entities.Order.create(orderPayload);
+        orderSaved = true;
+      } catch (error) {
+        console.warn("Order database save failed; continuing with WhatsApp handoff.", error);
+        try {
+          window.localStorage.setItem("lamhatc_pending_order", JSON.stringify({
+            ...orderPayload,
+            saved_at: new Date().toISOString(),
+            save_error: error?.message || "Unknown order save error",
+          }));
+        } catch (storageError) {
+          console.warn("Pending order local backup failed.", storageError);
+        }
+      }
+
+      if (appliedDiscount && orderSaved) {
+        try {
+          await db.entities.DiscountCode.update(appliedDiscount.id, {
+            used_count: Number(appliedDiscount.used_count || 0) + 1,
+          });
+        } catch (error) {
+          console.warn("Discount usage update failed; continuing with order.", error);
+        }
+      }
+
+      setOrderSaveStatus(orderSaved ? "saved" : "whatsapp");
+      const whatsappUrl = `https://wa.me/${STORE_WHATSAPP[branch]}?text=${encodeURIComponent(whatsappText)}`;
+      setWhatsappLink(whatsappUrl);
+      const openedWindow = window.open(whatsappUrl, "_blank");
+      if (!openedWindow) {
+        toast.info("إذا لم تفتح واتساب تلقائيًا، استخدم زر واتساب بعد تأكيد الطلب.");
+      }
+      toast.success(orderSaved ? "تم إرسال الطلب" : "تم تجهيز الطلب على واتساب");
       setStep("success");
     } catch (error) {
-      toast.error("تعذر إرسال الطلب، حاول مرة أخرى");
+      console.error("Order submit failed.", error);
+      toast.error("تعذر تجهيز الطلب، تأكد من البيانات وحاول مرة أخرى");
     } finally {
       setSubmitting(false);
     }
@@ -562,6 +543,8 @@ export default function Menu() {
     setReceiptUrl("");
     setDiscountCode("");
     setAppliedDiscount(null);
+    setOrderSaveStatus("saved");
+    setWhatsappLink("");
   };
 
   if (step === "success") {
@@ -571,11 +554,18 @@ export default function Menu() {
           <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
             <CheckCircle2 className="h-12 w-12" />
           </div>
-          <h1 className="text-3xl font-black">تم إرسال طلبك</h1>
+          <h1 className="text-3xl font-black">{orderSaveStatus === "saved" ? "تم إرسال طلبك" : "تم تجهيز طلبك"}</h1>
           <p className="mt-3 text-sm leading-7 text-slate-600">
-            وصل الطلب للنظام، وفتحنا رسالة واتساب جاهزة للمتجر لمتابعة الطلب بسرعة.
+            {orderSaveStatus === "saved"
+              ? "وصل الطلب للنظام، وفتحنا رسالة واتساب جاهزة للمتجر لمتابعة الطلب بسرعة."
+              : "فتحنا رسالة واتساب جاهزة للمتجر. أرسل الرسالة ليصل الطلب فورًا، ثم راجع إعدادات Supabase لحفظه داخل لوحة الطلبات."}
           </p>
-          <button onClick={resetOrder} className="mt-8 h-12 w-full rounded-lg bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800">
+          {whatsappLink && (
+            <a href={whatsappLink} target="_blank" rel="noreferrer" className="mt-6 flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 text-sm font-black text-white transition hover:bg-emerald-700">
+              فتح واتساب
+            </a>
+          )}
+          <button onClick={resetOrder} className="mt-3 h-12 w-full rounded-lg bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800">
             الرجوع للكتالوج
           </button>
         </div>
@@ -722,21 +712,21 @@ export default function Menu() {
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f7f9fb] text-slate-950" dir="rtl">
       <section className="relative border-b border-slate-200 bg-white">
-        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[1fr_320px_260px] lg:items-center lg:px-6 lg:py-7">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-4 py-5 lg:grid-cols-[1fr_300px] lg:items-center lg:px-6">
           <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} className="order-1 min-w-0 overflow-hidden text-right">
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-black text-amber-800">
-                <Sparkles className="h-4 w-4" /> كتالوج عام للطلب المباشر
+                <ShoppingBag className="h-4 w-4" /> كتالوج الطلب
               </span>
               <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
-                <BellRing className="h-4 w-4" /> تنبيه فوري عند الطلب
+                <BellRing className="h-4 w-4" /> يصل للمتجر مباشرة
               </span>
             </div>
             <h1 className="max-w-full break-words text-3xl font-black leading-tight text-slate-950 sm:text-4xl lg:text-5xl">
-              كتالوج لمحاتك
+              منتجات لمحاتك
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
-              تصفح المنتجات، اختر الفرع، وأرسل طلبك بخطوات قليلة. البيانات تصل للنظام تلقائيًا مع تفاصيل العميل والطلب.
+              اختر المنتجات المتاحة من نفس مخزون لوحة التحكم، ثم أرسل الطلب ببيانات واضحة للمتجر.
             </p>
             <div className="mt-4 grid grid-cols-3 gap-2 sm:max-w-lg">
               <StatPill icon={Package} label="منتجات" value={products.length} />
@@ -745,15 +735,7 @@ export default function Menu() {
             </div>
           </motion.div>
 
-          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.45, delay: 0.08 }} className="order-3 grid grid-cols-2 gap-2 lg:order-2">
-            {heroImages.map((image, index) => (
-              <div key={`${image}-${index}`} className={`overflow-hidden rounded-lg bg-slate-100 ${index === 0 ? "row-span-2 aspect-[4/5]" : "aspect-[4/3]"}`}>
-                <img src={image} alt="" className="h-full w-full object-cover" loading="lazy" />
-              </div>
-            ))}
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.45, delay: 0.12 }} className="order-2 rounded-lg border border-slate-200 bg-slate-50 p-3 lg:order-3">
+          <motion.div initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.45, delay: 0.12 }} className="order-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="mb-2 text-sm font-black">اختر الفرع</p>
             <div className="grid grid-cols-2 gap-2">
               {Object.entries(BRANCH_META).map(([key, item]) => (
@@ -798,7 +780,7 @@ export default function Menu() {
           </label>
 
           <div className="hide-scrollbar flex gap-3 overflow-x-auto pb-1">
-            {[{ name: "all", image_url: heroImages[0], count: products.length }, ...categories].map((category) => (
+            {[{ name: "all", image_url: "", count: products.length }, ...categories].map((category) => (
               <CategoryButton
                 key={category.name}
                 category={category}
@@ -878,7 +860,7 @@ function StatPill({ icon: Icon, label, value, tone = "slate" }) {
 }
 
 function CategoryButton({ category, active, onClick }) {
-  const image = category.image_url || getCategoryFallbackImage(category.name);
+  const image = category.image_url || "";
 
   return (
     <motion.button
@@ -890,7 +872,13 @@ function CategoryButton({ category, active, onClick }) {
       }`}
     >
       <span className="h-12 w-12 overflow-hidden rounded-lg bg-slate-100">
-        <img src={image} alt="" className="h-full w-full object-cover" loading="lazy" />
+        {image ? (
+          <img src={image} alt="" className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center text-slate-400">
+            <Package className="h-5 w-5" />
+          </span>
+        )}
       </span>
       <span className="min-w-0">
         <span className="block truncate text-xs font-black">{category.name === "all" ? "الكل" : category.name}</span>
@@ -966,11 +954,17 @@ function ProductTile({ product, index, meta, item, image, onAdd, onQty }) {
       className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-xl hover:shadow-slate-950/10"
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
-        <img src={image} alt={product.name || ""} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" />
-        <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-950/65 to-transparent" />
+        {image ? (
+          <img src={image} alt={product.name || ""} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-slate-50 text-slate-300">
+            <Package className="h-12 w-12" strokeWidth={1.5} />
+          </div>
+        )}
+        {image && <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-950/65 to-transparent" />}
         {stock <= 0 && <div className="absolute inset-0 flex items-center justify-center bg-slate-950/55 text-sm font-black text-white">غير متوفر</div>}
         {getProductCategory(product) && <span className="absolute right-3 top-3 max-w-[80%] truncate rounded-full bg-white/92 px-3 py-1 text-xs font-black text-slate-700 shadow-sm">{getProductCategory(product)}</span>}
-        <span className="absolute bottom-3 right-3 rounded-lg bg-white px-3 py-1.5 text-sm font-black text-slate-950 shadow-sm">
+        <span className={`absolute bottom-3 right-3 rounded-lg bg-white px-3 py-1.5 text-sm font-black text-slate-950 shadow-sm ${!image ? "border border-slate-200" : ""}`}>
           {formatMoney(price, meta.currency)}
         </span>
       </div>

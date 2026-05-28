@@ -8,6 +8,11 @@ const isMissingTableError = (error) => {
   return message.includes('schema cache') || message.includes('Could not find the table') || (message.includes('relation') && message.includes('does not exist'));
 };
 
+const isMissingColumnError = (error, columnName) => {
+  const message = error?.message || '';
+  return message.includes(columnName) && (message.includes('column') || message.includes('schema cache'));
+};
+
 // =============================================
 // Entity Class - نفس واجهة Base44
 // =============================================
@@ -63,19 +68,32 @@ class Entity {
 
   async create(record) {
     const { data: { user } } = await supabase.auth.getUser();
-    const { data, error } = await supabase
+    const payload = { ...record, created_by: user?.email || null };
+    let { data, error } = await supabase
       .from(this.tableName)
-      .insert([{ ...record, created_by: user?.email || null }])
+      .insert([payload])
       .select().single();
+    if (error && isMissingColumnError(error, 'created_by')) {
+      ({ data, error } = await supabase
+        .from(this.tableName)
+        .insert([record])
+        .select().single());
+    }
     if (error) throw error;
     return data;
   }
 
   async update(id, updates) {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from(this.tableName)
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id).select().single();
+    if (error && isMissingColumnError(error, 'updated_at')) {
+      ({ data, error } = await supabase
+        .from(this.tableName)
+        .update(updates)
+        .eq('id', id).select().single());
+    }
     if (error) throw error;
     return data;
   }
