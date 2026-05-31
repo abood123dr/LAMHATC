@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Customer, Sale } from "@/api/base44Client";
+import { motion } from "framer-motion";
 
 import { Plus, Search, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -83,7 +84,7 @@ export default function Customers() {
   });
 
   return (
-    <div>
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <PageHeader
         title="العملاء"
         subtitle="قاعدة بيانات كاملة للعملاء مع صور التركيب"
@@ -187,6 +188,6 @@ export default function Customers() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </motion.div>
   );
 }

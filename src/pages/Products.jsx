@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import base44, { Product, Sale, Category } from "@/api/base44Client";
+import { motion } from "framer-motion";
 import { Plus, Search, Package, FolderPlus, ImagePlus, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -228,7 +229,7 @@ export default function Products() {
   const selectedCategory = activeCategory === "all" ? null : categoryCards.find((cat) => cat.name === activeCategory);
 
   return (
-    <div>
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <PageHeader
         title="المنتجات والمخزون"
         subtitle="إدارة مستقلة لمخزون وأسعار كل فرع"
@@ -329,6 +330,6 @@ export default function Products() {
           <AlertDialogFooter><AlertDialogCancel>إلغاء</AlertDialogCancel><AlertDialogAction onClick={() => deleting && deleteMut.mutate(deleting.id)} className="bg-destructive hover:bg-destructive/90">حذف</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </motion.div>
   );
 }

@@ -13,8 +13,10 @@ import {
   Tag,
   Link2,
   Star,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/AuthContext";
 
 const navItems = [
   { to: "/dashboard", icon: LayoutDashboard, label: "لوحة التحكم" },
@@ -32,6 +34,7 @@ const navItems = [
 ];
 
 export default function Sidebar({ onNavigate }) {
+  const { user, logout } = useAuth();
   return (
     <aside className="h-full w-full bg-sidebar text-sidebar-foreground flex flex-col">
       {/* Brand */}
@@ -88,14 +91,21 @@ export default function Sidebar({ onNavigate }) {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-sidebar-border">
+      <div className="p-4 border-t border-sidebar-border space-y-2">
         <div className="px-3 py-3 rounded-lg bg-sidebar-accent/50">
-          <p className="text-xs text-sidebar-foreground/60 mb-1">نظام إدارة</p>
-          <p className="text-sm font-semibold text-sidebar-foreground">
-            مخزون ومبيعات
+          <p className="text-xs text-sidebar-foreground/60 mb-1">الحساب</p>
+          <p className="text-sm font-semibold text-sidebar-foreground truncate">
+            {user?.email || "مستخدم"}
           </p>
           <p className="text-[11px] text-gold mt-1">السعودية · تركيا</p>
         </div>
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-destructive/10 hover:text-destructive transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          تسجيل الخروج
+        </button>
       </div>
     </aside>
   );

@@ -1,8 +1,10 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sale, Product, Customer, StockMovement } from "@/api/base44Client";
-import { Plus, ShoppingBag, Trash2, Images } from "lucide-react";
+import { Plus, ShoppingBag, Trash2, Images, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { motion } from "framer-motion";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import EmptyState from "@/components/shared/EmptyState";
@@ -20,8 +22,9 @@ export default function Sales() {
   const [formOpen, setFormOpen] = useState(false);
   const [branch, setBranch] = useState("all");
   const [deleting, setDeleting] = useState(null);
+  const [search, setSearch] = useState("");
 
-  const { data: sales = [] } = useQuery({
+  const { data: sales = [], isLoading: loadingSales } = useQuery({
     queryKey: ["sales"],
     queryFn: () => Sale.list('-sale_date', 500),
   });
@@ -101,10 +104,14 @@ export default function Sales() {
     onError: (e) => toast.error("خطأ: " + e.message),
   });
 
-  const filtered = branch === "all" ? sales : sales.filter((s) => s.branch === branch);
+  const filtered = sales.filter((s) => {
+    if (branch !== "all" && s.branch !== branch) return false;
+    if (search && !(s.product_name?.toLowerCase().includes(search.toLowerCase()) || s.customer_name?.toLowerCase().includes(search.toLowerCase()))) return false;
+    return true;
+  });
 
   return (
-    <div>
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <PageHeader
         title="المبيعات"
         subtitle="سجل كامل لعمليات البيع مع حساب الأرباح تلقائيًا"
@@ -114,6 +121,10 @@ export default function Sales() {
         <Plus className="w-6 h-6" />
       </button>
       <SalesStats sales={sales} branch={branch} />
+      <div className="mb-4 relative max-w-md">
+        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث بالمنتج أو العميل..." className="pr-10" />
+      </div>
       <div className="bg-card border border-border rounded-2xl shadow-luxe overflow-hidden">
         <div className="p-4 md:p-5 border-b border-border">
           <Tabs value={branch} onValueChange={setBranch}>
@@ -124,7 +135,22 @@ export default function Sales() {
             </TabsList>
           </Tabs>
         </div>
-        {filtered.length === 0 ? (
+        {loadingSales ? (
+          <div className="divide-y divide-border">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="px-5 py-4 flex items-center gap-3 animate-pulse">
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-muted rounded w-2/5" />
+                  <div className="h-3 bg-muted rounded w-1/3" />
+                </div>
+                <div className="space-y-1.5 text-left">
+                  <div className="h-4 bg-muted rounded w-20" />
+                  <div className="h-3 bg-muted rounded w-14" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
           <EmptyState icon={ShoppingBag} title="لا توجد مبيعات" description="ابدأ بتسجيل أول عملية بيع" action={<Button onClick={() => setFormOpen(true)} className="bg-gold hover:bg-gold-dark text-white gap-2"><Plus className="w-4 h-4" /> تسجيل بيع</Button>} />
         ) : (
           <>
@@ -192,6 +218,6 @@ export default function Sales() {
           <AlertDialogFooter><AlertDialogCancel>إلغاء</AlertDialogCancel><AlertDialogAction onClick={() => deleting && deleteMut.mutate(deleting)} className="bg-destructive hover:bg-destructive/90">حذف</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </motion.div>
   );
 }

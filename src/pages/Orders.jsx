@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import base44 from "@/api/base44Client";
-
+import { motion } from "framer-motion";
 import { ShoppingBag, Bell, ExternalLink, ChevronDown, Copy, Check, Link } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/shared/PageHeader";
@@ -71,18 +71,18 @@ function StatusDropdown({ order, onUpdate }) {
         <ChevronDown className="w-3 h-3 opacity-60" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[140px]">
+        <div className="absolute left-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-xl overflow-hidden min-w-[140px]">
           {STATUS_ORDER.map((s) => {
             const info = STATUS_LABELS[s];
             return (
               <button
                 key={s}
                 onClick={() => { onUpdate(order.id, s); setOpen(false); }}
-                className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold hover:bg-gray-50 transition-colors text-right ${order.status === s ? "bg-gray-50" : ""}`}
+                className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold hover:bg-accent transition-colors text-right text-foreground ${order.status === s ? "bg-accent" : ""}`}
               >
                 <span className={`w-2 h-2 rounded-full ${info.dot}`} />
                 {info.label}
-                {order.status === s && <span className="mr-auto text-gray-400">✓</span>}
+                {order.status === s && <span className="mr-auto text-gold">✓</span>}
               </button>
             );
           })}
@@ -162,7 +162,7 @@ export default function Orders() {
   };
 
   return (
-    <div>
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       {/* Menu Links Card */}
       <div className="bg-card border border-border rounded-2xl p-4 mb-6 shadow-luxe">
         <div className="flex items-center gap-2 mb-3">
@@ -291,7 +291,34 @@ export default function Orders() {
             description="ستظهر الطلبات هنا فور ورودها من صفحة المنيو"
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Mobile view */}
+            <div className="md:hidden divide-y divide-border">
+              {filtered.map((order) => {
+                const st = STATUS_LABELS[order.status] || STATUS_LABELS.new;
+                return (
+                  <div key={order.id} className={`px-4 py-4 cursor-pointer hover:bg-accent/30 transition-colors ${order.status === "new" ? "bg-blue-50/40 dark:bg-blue-950/20" : ""}`} onClick={() => setViewing(order)}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-sm text-foreground truncate">{order.customer_name}</p>
+                        <p className="text-xs text-muted-foreground" dir="ltr">{order.customer_phone}</p>
+                      </div>
+                      <StatusDropdown order={order} onUpdate={(id, status) => updateMut.mutate({ id, status })} />
+                    </div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <BranchBadge branch={order.branch} size="sm" />
+                      <span className="text-xs text-muted-foreground">{order.items?.length || 0} منتج</span>
+                      <span className="font-bold text-gold text-sm">{formatCurrency(order.total_amount, order.branch)}</span>
+                      {(order.created_at || order.created_date) && (
+                        <span className="text-xs text-muted-foreground mr-auto">{format(new Date(order.created_at || order.created_date), "d MMM، HH:mm", { locale: ar })}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Desktop view */}
+            <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
               <thead className="bg-muted/50">
                 <tr className="text-xs text-muted-foreground">
@@ -336,11 +363,12 @@ export default function Orders() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
 
       <OrderDetail order={viewing} open={!!viewing} onOpenChange={(v) => !v && setViewing(null)} onStatusChange={(id, status) => updateMut.mutate({ id, status })} />
-    </div>
+    </motion.div>
   );
 }
