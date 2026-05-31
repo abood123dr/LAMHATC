@@ -980,58 +980,83 @@ function RefreshIcon(props) {
 function ProductTile({ product, index, meta, item, image, onAdd, onQty }) {
   const price = Number(product[meta.priceKey] || 0);
   const stock = Number(product[meta.stockKey] || 0);
+  const inCart = !!item;
 
   return (
     <motion.article
       layout
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(index * 0.035, 0.28), duration: 0.35 }}
-      whileHover={{ y: -5 }}
-      className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-xl hover:shadow-slate-950/10"
+      transition={{ delay: Math.min(index * 0.04, 0.3), duration: 0.35, ease: "easeOut" }}
+      whileHover={{ y: -6, transition: { duration: 0.2 } }}
+      className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-2xl hover:shadow-slate-950/15 transition-shadow duration-300"
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
         {image ? (
-          <img src={image} alt={product.name || ""} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" />
+          <img src={image} alt={product.name || ""} className="h-full w-full object-cover transition duration-700 ease-out group-hover:scale-110" loading="lazy" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-slate-50 text-slate-300">
-            <Package className="h-12 w-12" strokeWidth={1.5} />
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 text-slate-300">
+            <Package className="h-14 w-14" strokeWidth={1} />
           </div>
         )}
-        {image && <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-950/65 to-transparent" />}
-        {stock <= 0 && <div className="absolute inset-0 flex items-center justify-center bg-slate-950/55 text-sm font-black text-white">غير متوفر</div>}
-        {getProductCategory(product) && <span className="absolute right-3 top-3 max-w-[80%] truncate rounded-full bg-white/92 px-3 py-1 text-xs font-black text-slate-700 shadow-sm">{getProductCategory(product)}</span>}
-        <span className={`absolute bottom-3 right-3 rounded-lg bg-white px-3 py-1.5 text-sm font-black text-slate-950 shadow-sm ${!image ? "border border-slate-200" : ""}`}>
+        {image && <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />}
+        {stock <= 0 && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm">
+            <span className="rounded-full bg-white/20 px-4 py-1.5 text-sm font-black text-white border border-white/30">غير متوفر</span>
+          </div>
+        )}
+        {getProductCategory(product) && (
+          <span className="absolute right-3 top-3 max-w-[80%] truncate rounded-full bg-white/95 backdrop-blur-sm px-3 py-1 text-xs font-bold text-slate-700 shadow-sm">
+            {getProductCategory(product)}
+          </span>
+        )}
+        <span className={`absolute bottom-3 right-3 rounded-xl bg-white px-3 py-1.5 text-sm font-black text-slate-950 shadow-md ${!image ? "border border-slate-200" : ""}`}>
           {formatMoney(price, meta.currency)}
         </span>
+        {inCart && (
+          <motion.span
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-amber-500 shadow-lg shadow-amber-500/30"
+          >
+            <span className="text-xs font-black text-white">{item.quantity}</span>
+          </motion.span>
+        )}
       </div>
       <div className="p-4">
-        <div className="min-h-[74px]">
+        <div className="min-h-[64px]">
           <h2 className="line-clamp-2 text-base font-black leading-6 text-slate-950">{product.name}</h2>
           {product.description ? (
             <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{product.description}</p>
           ) : (
-            <p className="mt-1 text-xs leading-5 text-slate-400">جاهز للطلب من الكتالوج.</p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">جاهز للطلب.</p>
           )}
         </div>
         <div className="mt-4 flex items-center justify-between gap-3">
           <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${stock <= 0 ? "bg-red-50 text-red-600" : stock <= 3 ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
-            {stock <= 0 ? "نفد المخزون" : stock <= 3 ? `آخر ${stock}` : "متوفر الآن"}
+            {stock <= 0 ? "نفد المخزون" : stock <= 3 ? `آخر ${stock}` : "متوفر"}
           </span>
           {item ? (
-            <div className="flex items-center gap-2">
-              <button onClick={() => onQty(product.id, -1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 transition hover:bg-slate-200">
+            <div className="flex items-center gap-1.5">
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => onQty(product.id, -1)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 font-black transition hover:bg-slate-200 active:bg-slate-300">
                 <Minus className="h-4 w-4" />
-              </button>
-              <span className="w-7 text-center text-sm font-black">{item.quantity}</span>
-              <button onClick={() => onQty(product.id, 1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white transition hover:bg-slate-800">
+              </motion.button>
+              <motion.span key={item.quantity} initial={{ scale: 1.3 }} animate={{ scale: 1 }} className="w-8 text-center text-sm font-black text-slate-950">
+                {item.quantity}
+              </motion.span>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => onQty(product.id, 1)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500 text-white shadow-md shadow-amber-500/30 transition hover:bg-amber-600">
                 <Plus className="h-4 w-4" />
-              </button>
+              </motion.button>
             </div>
           ) : (
-            <button onClick={() => onAdd(product)} disabled={stock <= 0} className="flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-xs font-black text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:translate-y-0 disabled:bg-slate-300">
+            <motion.button
+              whileTap={{ scale: 0.88 }}
+              onClick={() => onAdd(product)}
+              disabled={stock <= 0}
+              className="flex h-10 items-center gap-2 rounded-xl bg-amber-500 px-4 text-xs font-black text-white shadow-md shadow-amber-500/25 transition hover:-translate-y-0.5 hover:bg-amber-600 hover:shadow-amber-500/40 disabled:translate-y-0 disabled:bg-slate-200 disabled:shadow-none disabled:text-slate-400"
+            >
               <Plus className="h-4 w-4" /> إضافة
-            </button>
+            </motion.button>
           )}
         </div>
       </div>
