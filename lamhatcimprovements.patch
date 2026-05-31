@@ -1,0 +1,353 @@
+From 602deb02b83cdcb80c98504027ded50d6d6a8e39 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 31 May 2026 22:03:50 +0000
+Subject: [PATCH 1/3] chore: ignore .claude worktree directory
+
+https://claude.ai/code/session_01AqeXS1gPLBPxNbFqcwnGL9
+---
+ .gitignore | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/.gitignore b/.gitignore
+index 5ad8c29..836b1fa 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -31,3 +31,4 @@ dist-ssr
+ .vite
+ .vs/ 
+ .vs/ 
++.claude/
+-- 
+2.43.0
+
+
+From 2df2bce6bafcaaee7d51a7318509e0780de4ee87 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 31 May 2026 22:05:24 +0000
+Subject: [PATCH 2/3] improve UX: search in sales, mobile orders view, dark
+ mode fixes, page animations, logout button
+
+https://claude.ai/code/session_01AqeXS1gPLBPxNbFqcwnGL9
+---
+ src/components/layout/Sidebar.jsx | 18 ++++++++++---
+ src/pages/Customers.jsx           |  5 ++--
+ src/pages/Orders.jsx              | 42 +++++++++++++++++++++++++------
+ src/pages/Products.jsx            |  5 ++--
+ src/pages/Sales.jsx               | 38 +++++++++++++++++++++++-----
+ 5 files changed, 87 insertions(+), 21 deletions(-)
+
+diff --git a/src/components/layout/Sidebar.jsx b/src/components/layout/Sidebar.jsx
+index 9399928..863772a 100644
+--- a/src/components/layout/Sidebar.jsx
++++ b/src/components/layout/Sidebar.jsx
+@@ -13,8 +13,10 @@ import {
+   Tag,
+   Link2,
+   Star,
++  LogOut,
+ } from "lucide-react";
+ import { cn } from "@/lib/utils";
++import { useAuth } from "@/lib/AuthContext";
+ 
+ const navItems = [
+   { to: "/dashboard", icon: LayoutDashboard, label: "لوحة التحكم" },
+@@ -32,6 +34,7 @@ const navItems = [
+ ];
+ 
+ export default function Sidebar({ onNavigate }) {
++  const { user, logout } = useAuth();
+   return (
+     <aside className="h-full w-full bg-sidebar text-sidebar-foreground flex flex-col">
+       {/* Brand */}
+@@ -88,14 +91,21 @@ export default function Sidebar({ onNavigate }) {
+       </nav>
+ 
+       {/* Footer */}
+-      <div className="p-4 border-t border-sidebar-border">
++      <div className="p-4 border-t border-sidebar-border space-y-2">
+         <div className="px-3 py-3 rounded-lg bg-sidebar-accent/50">
+-          <p className="text-xs text-sidebar-foreground/60 mb-1">نظام إدارة</p>
+-          <p className="text-sm font-semibold text-sidebar-foreground">
+-            مخزون ومبيعات
++          <p className="text-xs text-sidebar-foreground/60 mb-1">الحساب</p>
++          <p className="text-sm font-semibold text-sidebar-foreground truncate">
++            {user?.email || "مستخدم"}
+           </p>
+           <p className="text-[11px] text-gold mt-1">السعودية · تركيا</p>
+         </div>
++        <button
++          onClick={logout}
++          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-destructive/10 hover:text-destructive transition-colors"
++        >
++          <LogOut className="w-4 h-4" />
++          تسجيل الخروج
++        </button>
+       </div>
+     </aside>
+   );
+diff --git a/src/pages/Customers.jsx b/src/pages/Customers.jsx
+index 9c33a29..4c16f3a 100644
+--- a/src/pages/Customers.jsx
++++ b/src/pages/Customers.jsx
+@@ -1,6 +1,7 @@
+ import React, { useState } from "react";
+ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+ import { Customer, Sale } from "@/api/base44Client";
++import { motion } from "framer-motion";
+ 
+ import { Plus, Search, Users } from "lucide-react";
+ import { Button } from "@/components/ui/button";
+@@ -83,7 +84,7 @@ export default function Customers() {
+   });
+ 
+   return (
+-    <div>
++    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+       <PageHeader
+         title="العملاء"
+         subtitle="قاعدة بيانات كاملة للعملاء مع صور التركيب"
+@@ -187,6 +188,6 @@ export default function Customers() {
+           </AlertDialogFooter>
+         </AlertDialogContent>
+       </AlertDialog>
+-    </div>
++    </motion.div>
+   );
+ }
+\ No newline at end of file
+diff --git a/src/pages/Orders.jsx b/src/pages/Orders.jsx
+index d315642..0931607 100644
+--- a/src/pages/Orders.jsx
++++ b/src/pages/Orders.jsx
+@@ -1,7 +1,7 @@
+ import React, { useState, useEffect, useRef } from "react";
+ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+ import base44 from "@/api/base44Client";
+-
++import { motion } from "framer-motion";
+ import { ShoppingBag, Bell, ExternalLink, ChevronDown, Copy, Check, Link } from "lucide-react";
+ import { Button } from "@/components/ui/button";
+ import PageHeader from "@/components/shared/PageHeader";
+@@ -71,18 +71,18 @@ function StatusDropdown({ order, onUpdate }) {
+         <ChevronDown className="w-3 h-3 opacity-60" />
+       </button>
+       {open && (
+-        <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[140px]">
++        <div className="absolute left-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-xl overflow-hidden min-w-[140px]">
+           {STATUS_ORDER.map((s) => {
+             const info = STATUS_LABELS[s];
+             return (
+               <button
+                 key={s}
+                 onClick={() => { onUpdate(order.id, s); setOpen(false); }}
+-                className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold hover:bg-gray-50 transition-colors text-right ${order.status === s ? "bg-gray-50" : ""}`}
++                className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold hover:bg-accent transition-colors text-right text-foreground ${order.status === s ? "bg-accent" : ""}`}
+               >
+                 <span className={`w-2 h-2 rounded-full ${info.dot}`} />
+                 {info.label}
+-                {order.status === s && <span className="mr-auto text-gray-400">✓</span>}
++                {order.status === s && <span className="mr-auto text-gold">✓</span>}
+               </button>
+             );
+           })}
+@@ -162,7 +162,7 @@ export default function Orders() {
+   };
+ 
+   return (
+-    <div>
++    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+       {/* Menu Links Card */}
+       <div className="bg-card border border-border rounded-2xl p-4 mb-6 shadow-luxe">
+         <div className="flex items-center gap-2 mb-3">
+@@ -291,7 +291,34 @@ export default function Orders() {
+             description="ستظهر الطلبات هنا فور ورودها من صفحة المنيو"
+           />
+         ) : (
+-          <div className="overflow-x-auto">
++          <>
++            {/* Mobile view */}
++            <div className="md:hidden divide-y divide-border">
++              {filtered.map((order) => {
++                const st = STATUS_LABELS[order.status] || STATUS_LABELS.new;
++                return (
++                  <div key={order.id} className={`px-4 py-4 cursor-pointer hover:bg-accent/30 transition-colors ${order.status === "new" ? "bg-blue-50/40 dark:bg-blue-950/20" : ""}`} onClick={() => setViewing(order)}>
++                    <div className="flex items-start justify-between gap-2 mb-2">
++                      <div className="flex-1 min-w-0">
++                        <p className="font-bold text-sm text-foreground truncate">{order.customer_name}</p>
++                        <p className="text-xs text-muted-foreground" dir="ltr">{order.customer_phone}</p>
++                      </div>
++                      <StatusDropdown order={order} onUpdate={(id, status) => updateMut.mutate({ id, status })} />
++                    </div>
++                    <div className="flex items-center gap-3 flex-wrap">
++                      <BranchBadge branch={order.branch} size="sm" />
++                      <span className="text-xs text-muted-foreground">{order.items?.length || 0} منتج</span>
++                      <span className="font-bold text-gold text-sm">{formatCurrency(order.total_amount, order.branch)}</span>
++                      {(order.created_at || order.created_date) && (
++                        <span className="text-xs text-muted-foreground mr-auto">{format(new Date(order.created_at || order.created_date), "d MMM، HH:mm", { locale: ar })}</span>
++                      )}
++                    </div>
++                  </div>
++                );
++              })}
++            </div>
++            {/* Desktop view */}
++            <div className="hidden md:block overflow-x-auto">
+             <table className="w-full">
+               <thead className="bg-muted/50">
+                 <tr className="text-xs text-muted-foreground">
+@@ -336,7 +363,8 @@ export default function Orders() {
+                 })}
+               </tbody>
+             </table>
+-          </div>
++            </div>
++          </>
+         )}
+       </div>
+ 
+diff --git a/src/pages/Products.jsx b/src/pages/Products.jsx
+index e8ec611..22afa97 100644
+--- a/src/pages/Products.jsx
++++ b/src/pages/Products.jsx
+@@ -1,6 +1,7 @@
+ import React, { useState, useMemo } from "react";
+ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+ import base44, { Product, Sale, Category } from "@/api/base44Client";
++import { motion } from "framer-motion";
+ import { Plus, Search, Package, FolderPlus, ImagePlus, Pencil } from "lucide-react";
+ import { Input } from "@/components/ui/input";
+ import { Button } from "@/components/ui/button";
+@@ -228,7 +229,7 @@ export default function Products() {
+   const selectedCategory = activeCategory === "all" ? null : categoryCards.find((cat) => cat.name === activeCategory);
+ 
+   return (
+-    <div>
++    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+       <PageHeader
+         title="المنتجات والمخزون"
+         subtitle="إدارة مستقلة لمخزون وأسعار كل فرع"
+@@ -329,6 +330,6 @@ export default function Products() {
+           <AlertDialogFooter><AlertDialogCancel>إلغاء</AlertDialogCancel><AlertDialogAction onClick={() => deleting && deleteMut.mutate(deleting.id)} className="bg-destructive hover:bg-destructive/90">حذف</AlertDialogAction></AlertDialogFooter>
+         </AlertDialogContent>
+       </AlertDialog>
+-    </div>
++    </motion.div>
+   );
+ }
+diff --git a/src/pages/Sales.jsx b/src/pages/Sales.jsx
+index 3c198b0..d9007bd 100644
+--- a/src/pages/Sales.jsx
++++ b/src/pages/Sales.jsx
+@@ -1,8 +1,10 @@
+ import React, { useState } from "react";
+ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+ import { Sale, Product, Customer, StockMovement } from "@/api/base44Client";
+-import { Plus, ShoppingBag, Trash2, Images } from "lucide-react";
++import { Plus, ShoppingBag, Trash2, Images, Search } from "lucide-react";
+ import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { motion } from "framer-motion";
+ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+ import PageHeader from "@/components/shared/PageHeader";
+ import EmptyState from "@/components/shared/EmptyState";
+@@ -20,8 +22,9 @@ export default function Sales() {
+   const [formOpen, setFormOpen] = useState(false);
+   const [branch, setBranch] = useState("all");
+   const [deleting, setDeleting] = useState(null);
++  const [search, setSearch] = useState("");
+ 
+-  const { data: sales = [] } = useQuery({
++  const { data: sales = [], isLoading: loadingSales } = useQuery({
+     queryKey: ["sales"],
+     queryFn: () => Sale.list('-sale_date', 500),
+   });
+@@ -101,10 +104,14 @@ export default function Sales() {
+     onError: (e) => toast.error("خطأ: " + e.message),
+   });
+ 
+-  const filtered = branch === "all" ? sales : sales.filter((s) => s.branch === branch);
++  const filtered = sales.filter((s) => {
++    if (branch !== "all" && s.branch !== branch) return false;
++    if (search && !(s.product_name?.toLowerCase().includes(search.toLowerCase()) || s.customer_name?.toLowerCase().includes(search.toLowerCase()))) return false;
++    return true;
++  });
+ 
+   return (
+-    <div>
++    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+       <PageHeader
+         title="المبيعات"
+         subtitle="سجل كامل لعمليات البيع مع حساب الأرباح تلقائيًا"
+@@ -114,6 +121,10 @@ export default function Sales() {
+         <Plus className="w-6 h-6" />
+       </button>
+       <SalesStats sales={sales} branch={branch} />
++      <div className="mb-4 relative max-w-md">
++        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
++        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث بالمنتج أو العميل..." className="pr-10" />
++      </div>
+       <div className="bg-card border border-border rounded-2xl shadow-luxe overflow-hidden">
+         <div className="p-4 md:p-5 border-b border-border">
+           <Tabs value={branch} onValueChange={setBranch}>
+@@ -124,7 +135,22 @@ export default function Sales() {
+             </TabsList>
+           </Tabs>
+         </div>
+-        {filtered.length === 0 ? (
++        {loadingSales ? (
++          <div className="divide-y divide-border">
++            {[...Array(5)].map((_, i) => (
++              <div key={i} className="px-5 py-4 flex items-center gap-3 animate-pulse">
++                <div className="flex-1 space-y-2">
++                  <div className="h-4 bg-muted rounded w-2/5" />
++                  <div className="h-3 bg-muted rounded w-1/3" />
++                </div>
++                <div className="space-y-1.5 text-left">
++                  <div className="h-4 bg-muted rounded w-20" />
++                  <div className="h-3 bg-muted rounded w-14" />
++                </div>
++              </div>
++            ))}
++          </div>
++        ) : filtered.length === 0 ? (
+           <EmptyState icon={ShoppingBag} title="لا توجد مبيعات" description="ابدأ بتسجيل أول عملية بيع" action={<Button onClick={() => setFormOpen(true)} className="bg-gold hover:bg-gold-dark text-white gap-2"><Plus className="w-4 h-4" /> تسجيل بيع</Button>} />
+         ) : (
+           <>
+@@ -192,6 +218,6 @@ export default function Sales() {
+           <AlertDialogFooter><AlertDialogCancel>إلغاء</AlertDialogCancel><AlertDialogAction onClick={() => deleting && deleteMut.mutate(deleting)} className="bg-destructive hover:bg-destructive/90">حذف</AlertDialogAction></AlertDialogFooter>
+         </AlertDialogContent>
+       </AlertDialog>
+-    </div>
++    </motion.div>
+   );
+ }
+\ No newline at end of file
+-- 
+2.43.0
+
+
+From bf35af85878742bd5752057b54c4276ee3491ebd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 31 May 2026 22:08:09 +0000
+Subject: [PATCH 3/3] fix: close motion.div correctly in Orders page
+
+https://claude.ai/code/session_01AqeXS1gPLBPxNbFqcwnGL9
+---
+ src/pages/Orders.jsx | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/pages/Orders.jsx b/src/pages/Orders.jsx
+index 0931607..d2e104b 100644
+--- a/src/pages/Orders.jsx
++++ b/src/pages/Orders.jsx
+@@ -369,6 +369,6 @@ export default function Orders() {
+       </div>
+ 
+       <OrderDetail order={viewing} open={!!viewing} onOpenChange={(v) => !v && setViewing(null)} onStatusChange={(id, status) => updateMut.mutate({ id, status })} />
+-    </div>
++    </motion.div>
+   );
+ }
+-- 
+2.43.0
+
